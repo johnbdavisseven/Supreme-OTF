@@ -12,7 +12,7 @@
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body, #root { height: 100%; }
-  body { background: #070b14; font-family: 'DM Sans', 'Helvetica Neue', sans-serif; color: #e2e8f0; -webkit-font-smoothing: antialiased; }
+  body { background: #070b14; font-family: 'DM Sans', 'Helvetica Neue', sans-serif; color: #e2e8f0; -webkit-font-smoothing: antialiased; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none; }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
@@ -23,10 +23,36 @@
   .fade-in { animation: fadeIn 0.4s ease forwards; }
   input:-webkit-autofill { -webkit-box-shadow: 0 0 0 30px #0c1425 inset !important; -webkit-text-fill-color: #e2e8f0 !important; }
   input::placeholder { color: rgba(255,255,255,0.25); }
+  input, textarea { -webkit-user-select: text; -moz-user-select: text; -ms-user-select: text; user-select: text; }
 </style>
 </head>
 <body>
 <div id="root"></div>
+<script>
+// ── Copy & Inspection Protection ──
+// Block right-click context menu
+document.addEventListener("contextmenu", function(e) { e.preventDefault(); });
+
+// Block keyboard shortcuts: Ctrl+U, Ctrl+S, Ctrl+C, Ctrl+A, Ctrl+Shift+I, Ctrl+Shift+J, F12
+document.addEventListener("keydown", function(e) {
+  // F12
+  if (e.key === "F12") { e.preventDefault(); return false; }
+  // Ctrl/Cmd shortcuts
+  if (e.ctrlKey || e.metaKey) {
+    // Ctrl+U (view source), Ctrl+S (save), Ctrl+C (copy), Ctrl+A (select all), Ctrl+P (print)
+    if (["u","s","c","a","p"].includes(e.key.toLowerCase())) { e.preventDefault(); return false; }
+    // Ctrl+Shift+I (dev tools), Ctrl+Shift+J (console), Ctrl+Shift+C (inspect)
+    if (e.shiftKey && ["i","j","c"].includes(e.key.toLowerCase())) { e.preventDefault(); return false; }
+  }
+});
+
+// Block drag events (prevents dragging images/content)
+document.addEventListener("dragstart", function(e) { e.preventDefault(); });
+
+// Block copy/cut events
+document.addEventListener("copy", function(e) { e.preventDefault(); });
+document.addEventListener("cut", function(e) { e.preventDefault(); });
+</script>
 <script type="text/babel">
 const { useState, useEffect, useCallback } = React;
 
