@@ -51,8 +51,8 @@ async function hashPassword(pw) {
 //   crypto.subtle.digest("SHA-256", new TextEncoder().encode("yourpassword")).then(b => console.log(Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("")))
 const AUTHORIZED_USERS = [
   { email: "jcoronado@depermian.com", passwordHash: "bb92cd1989af23aee379b57d0947fff1af299181fa825d9299c37bfe5565f12e" }, // DE2026!
-  // Add more users here:
-  // { email: "user@depermian.com", passwordHash: "sha256hashhere" },
+  { email: "jbrosig@deeh.com", passwordHash: "bb92cd1989af23aee379b57d0947fff1af299181fa825d9299c37bfe5565f12e" }, // DE2026!
+  { email: "jgriffin@depermian.com", passwordHash: "bb92cd1989af23aee379b57d0947fff1af299181fa825d9299c37bfe5565f12e" }, // DE2026!
 ];
 
 const LoginScreen = ({ onLogin }) => {
