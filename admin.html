@@ -181,7 +181,9 @@
 <script>
 const SUPABASE_URL = "https://bfpsvvojskrbzrhcuuwe.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmcHN2dm9qc2tyYnpyaGN1dXdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMDY0NDAsImV4cCI6MjA5Mjg4MjQ0MH0.5QHKJgVMkiby7iNd7sfoDHb6LsR3BMO-a8R3k2F7vIs";
-let ADMIN_PASSWORD = sessionStorage.getItem("sct_admin_pw") || "";
+// Use localStorage so the password persists across tabs (Documents ↔ Reports nav).
+// Fall back to sessionStorage for older sessions that may have written there.
+let ADMIN_PASSWORD = localStorage.getItem("sct_admin_pw") || sessionStorage.getItem("sct_admin_pw") || "";
 
 // ── Auth ──
 const authGate = document.getElementById("auth-gate");
@@ -216,13 +218,15 @@ authForm.addEventListener("submit", async (e) => {
   try {
     // Try a list call to validate the password
     await callAdmin({ action: "list", customer_code: "DOUBLE_EAGLE" });
-    sessionStorage.setItem("sct_admin_pw", ADMIN_PASSWORD);
+    localStorage.setItem("sct_admin_pw", ADMIN_PASSWORD);
+    sessionStorage.removeItem("sct_admin_pw");
     authGate.style.display = "none";
     adminUI.style.display = "block";
     loadDocs();
   } catch (err) {
     showAuthError(err.message === "unauthorized" ? "Incorrect password." : err.message);
     ADMIN_PASSWORD = "";
+    localStorage.removeItem("sct_admin_pw");
     sessionStorage.removeItem("sct_admin_pw");
   }
 });
@@ -231,7 +235,7 @@ authForm.addEventListener("submit", async (e) => {
 if (ADMIN_PASSWORD) {
   callAdmin({ action: "list", customer_code: "DOUBLE_EAGLE" })
     .then(() => { authGate.style.display = "none"; adminUI.style.display = "block"; loadDocs(); })
-    .catch(() => { ADMIN_PASSWORD = ""; sessionStorage.removeItem("sct_admin_pw"); });
+    .catch(() => { ADMIN_PASSWORD = ""; localStorage.removeItem("sct_admin_pw"); sessionStorage.removeItem("sct_admin_pw"); });
 }
 
 // ── Document list ──

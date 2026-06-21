@@ -304,11 +304,13 @@ async function callAdmin(payload) {
 // ---------- Auth ----------
 $("auth-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  $("auth-error").style.display = "none";
   const pw = $("admin-password").value;
   adminPw = pw;
   try {
     await callAdmin({ action: "list", customer_code: $("customer-select").value });
-    sessionStorage.setItem("sct_admin_pw", pw);
+    localStorage.setItem("sct_admin_pw", pw);
+    sessionStorage.removeItem("sct_admin_pw");
     $("auth-gate").style.display = "none";
     $("admin-ui").style.display = "block";
     loadList();
@@ -320,18 +322,21 @@ $("auth-form").addEventListener("submit", async (e) => {
   }
 });
 
-// Auto-resume from sessionStorage (set by docs admin)
+// Auto-resume from localStorage (set by either admin page). Cross-tab safe.
+// Fall back to sessionStorage for older sessions that wrote there.
 (function tryResume() {
-  const pw = sessionStorage.getItem("sct_admin_pw");
+  const pw = localStorage.getItem("sct_admin_pw") || sessionStorage.getItem("sct_admin_pw");
   if (!pw) return;
   adminPw = pw;
   callAdmin({ action: "list", customer_code: "DOUBLE_EAGLE" })
     .then(() => {
+      // Promote to localStorage in case it was only in sessionStorage
+      localStorage.setItem("sct_admin_pw", pw);
       $("auth-gate").style.display = "none";
       $("admin-ui").style.display = "block";
       loadList();
     })
-    .catch(() => { adminPw = null; sessionStorage.removeItem("sct_admin_pw"); });
+    .catch(() => { adminPw = null; localStorage.removeItem("sct_admin_pw"); sessionStorage.removeItem("sct_admin_pw"); });
 })();
 
 // ---------- List view ----------

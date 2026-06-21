@@ -133,7 +133,7 @@ function esc(s) { if (s === null || s === undefined) return ""; return String(s)
 
 const id = qs("id");
 const adminPreview = qs("preview") === "1";
-const adminPw = adminPreview ? sessionStorage.getItem("sct_admin_pw") : null;
+const adminPw = adminPreview ? (localStorage.getItem("sct_admin_pw") || sessionStorage.getItem("sct_admin_pw")) : null;
 
 async function loadReport() {
   if (!id) return renderError("Missing report id in URL.");
