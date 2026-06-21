@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Supreme OTF · Admin · Reports</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231B2A3D'/><text x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' fill='%238FAADC' font-family='Arial' font-weight='700' font-size='18'>S</text></svg>" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { background:#070b14; color:#e2e8f0; font-family:'DM Sans',sans-serif; -webkit-font-smoothing:antialiased; }
+  ::-webkit-scrollbar { width:6px; }
+  ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1); border-radius:3px; }
+  input, select, textarea, button { font-family:inherit; font-size:13px; outline:none; }
+  input[type="text"], input[type="number"], input[type="password"], input[type="date"], select, textarea {
+    width:100%; padding:10px 12px; background:#0c1425; border:1px solid rgba(255,255,255,0.08);
+    border-radius:6px; color:#e2e8f0;
+  }
+  input:focus, select:focus, textarea:focus { border-color:rgba(34,211,238,0.4); }
+  label { display:block; font-size:11px; font-weight:600; color:rgba(255,255,255,0.5);
+          letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px; }
+  button { cursor:pointer; transition:all 0.15s; }
+  .btn-primary { background:#22d3ee; color:#070b14; border:none; padding:10px 20px;
+                 border-radius:6px; font-weight:600; font-size:13px; }
+  .btn-primary:hover { background:#67e8f9; }
+  .btn-primary:disabled { opacity:0.4; cursor:not-allowed; }
+  .btn-secondary { background:transparent; color:rgba(255,255,255,0.6); border:1px solid rgba(255,255,255,0.1);
+                   padding:8px 14px; border-radius:6px; font-size:12px; font-weight:600; }
+  .btn-secondary:hover { background:rgba(255,255,255,0.05); color:#fff; border-color:rgba(255,255,255,0.2); }
+  .btn-danger { background:transparent; color:#ef4444; border:1px solid rgba(239,68,68,0.3);
+                padding:6px 12px; border-radius:6px; font-size:11px; font-weight:600; }
+  .btn-danger:hover { background:rgba(239,68,68,0.1); }
+  .btn-success { background:#10b981; color:#0a0f1f; border:none; padding:10px 18px;
+                 border-radius:6px; font-weight:600; font-size:13px; }
+  .btn-success:hover { background:#34d399; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px;
+          font-weight:700; letter-spacing:0.5px; text-transform:uppercase; }
+  .pill-daily   { background:rgba(34,211,238,0.15); color:#22d3ee; }
+  .pill-eoj     { background:rgba(245,158,11,0.15); color:#f59e0b; }
+  .pill-draft   { background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.5); }
+  .pill-published { background:rgba(16,185,129,0.15); color:#10b981; }
+  .panel { background:rgba(15,23,42,0.7); border:1px solid rgba(255,255,255,0.06);
+           border-radius:12px; padding:24px; margin-bottom:20px; }
+  .panel h3 { font-size:12px; text-transform:uppercase; letter-spacing:1.5px;
+              color:#22d3ee; font-weight:700; margin-bottom:14px;
+              border-bottom:1px solid rgba(34,211,238,0.15); padding-bottom:8px; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  .field-row { margin-bottom:14px; }
+  .telemetry-note { font-size:10px; color:#f59e0b; margin-top:4px;
+                    background:rgba(245,158,11,0.08); padding:4px 8px; border-radius:4px;
+                    border-left:2px solid #f59e0b; }
+  table.list { width:100%; border-collapse:collapse; }
+  table.list th, table.list td { padding:10px 12px; text-align:left; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px; }
+  table.list th { font-size:10px; text-transform:uppercase; color:rgba(255,255,255,0.4); letter-spacing:0.5px; font-weight:600; }
+  table.list tr:hover td { background:rgba(255,255,255,0.02); }
+  .empty-state { text-align:center; padding:40px 20px; color:rgba(255,255,255,0.4); font-size:13px; }
+  .product-row { display:grid; grid-template-columns:120px repeat(5, 1fr) auto; gap:8px; align-items:end; margin-bottom:8px; }
+  .product-row .prod-label { font-weight:600; font-size:12px; padding-bottom:10px; }
+</style>
+</head>
+<body>
+<div style="max-width:1200px; margin:0 auto; padding:24px 32px;">
+
+  <!-- Header -->
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;
+              padding-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.06);">
+    <div style="display:flex; align-items:center; gap:14px;">
+      <div style="width:36px; height:36px; background:#1B2A3D; border-radius:7px;
+                  display:flex; align-items:center; justify-content:center; color:#8FAADC;
+                  font-weight:700; font-size:18px;">S</div>
+      <div>
+        <div style="font-size:14px; font-weight:700; letter-spacing:1.2px;">SUPREME CHEMICAL TECHNOLOGY</div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.4); letter-spacing:1px;">ADMIN · COMPLETION REPORTS</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:14px; align-items:center;">
+      <a href="/admin.html" style="font-size:12px; color:rgba(255,255,255,0.5); text-decoration:none;">Documents</a>
+      <a href="/admin-reports.html" style="font-size:12px; color:#22d3ee; text-decoration:none; font-weight:600;">Reports</a>
+      <a href="/" style="font-size:12px; color:rgba(255,255,255,0.5); text-decoration:none;">← back to portal</a>
+    </div>
+  </div>
+
+  <!-- Auth gate -->
+  <div id="auth-gate" style="max-width:380px; margin:80px auto; background:rgba(15,23,42,0.7);
+                              border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:32px;">
+    <div style="font-size:18px; font-weight:600; margin-bottom:6px;">Admin sign-in</div>
+    <div style="font-size:12px; color:rgba(255,255,255,0.4); margin-bottom:24px;">Enter your admin password to manage completion reports.</div>
+    <form id="auth-form">
+      <label>Password</label>
+      <input type="password" id="admin-password" autocomplete="current-password" required />
+      <div id="auth-error" style="display:none; margin-top:10px; padding:8px 12px;
+                                    background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3);
+                                    border-radius:6px; color:#ef4444; font-size:12px;"></div>
+      <button class="btn-primary" type="submit" style="width:100%; margin-top:16px;">Sign in</button>
+    </form>
+  </div>
+
+  <!-- Main UI -->
+  <div id="admin-ui" style="display:none;">
+
+    <!-- LIST VIEW -->
+    <div id="list-view">
+      <div style="display:flex; gap:16px; align-items:flex-end; margin-bottom:20px;">
+        <div style="flex:1; max-width:260px;">
+          <label>Customer</label>
+          <select id="customer-select">
+            <option value="DOUBLE_EAGLE">Double Eagle Energy</option>
+            <option value="AGERON">Ageron Energy</option>
+            <option value="BTA">BTA Oil Producers</option>
+            <option value="KFOC">Kaiser-Francis (KFOC)</option>
+            <option value="MACK">Mack Energy</option>
+            <option value="UPCURVE">Upcurve Energy</option>
+          </select>
+        </div>
+        <div style="max-width:200px;">
+          <label>Filter by type</label>
+          <select id="type-filter">
+            <option value="">All types</option>
+            <option value="daily">Daily</option>
+            <option value="eoj">End of Job</option>
+          </select>
+        </div>
+        <button class="btn-primary" id="new-daily-btn">+ New Daily</button>
+        <button class="btn-primary" id="new-eoj-btn" style="background:#f59e0b;">+ New End-of-Job</button>
+      </div>
+
+      <div class="panel" style="padding:0;">
+        <div id="reports-list">
+          <div class="empty-state">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BUILDER VIEW -->
+    <div id="builder-view" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div>
+          <span id="builder-type-pill" class="pill pill-daily">DAILY</span>
+          <span id="builder-status-pill" class="pill pill-draft" style="margin-left:6px;">DRAFT</span>
+          <span id="builder-title" style="font-size:18px; font-weight:600; margin-left:12px;">New report</span>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-secondary" id="builder-back">← Back to list</button>
+          <button class="btn-secondary" id="builder-preview" disabled>Preview</button>
+          <button class="btn-primary" id="builder-save">Save draft</button>
+          <button class="btn-success" id="builder-publish" disabled>Publish to customer</button>
+        </div>
+      </div>
+
+      <!-- Header fields -->
+      <div class="panel">
+        <h3>Report Header</h3>
+        <div id="header-daily" class="grid-4" style="display:grid;">
+          <div><label>Report date *</label><input type="date" id="f-report-date" /></div>
+          <div><label>Pad</label><input type="text" id="f-pad" placeholder="e.g. Bankhead" /></div>
+          <div><label>Well / Tank</label><input type="text" id="f-well" placeholder="e.g. 22-11W" /></div>
+          <div><label>Technician</label><input type="text" id="f-technician" placeholder="Name" /></div>
+          <div style="grid-column: span 2;"><label>Weather</label><input type="text" id="f-weather" placeholder="e.g. 95F, partly cloudy, light wind" /></div>
+          <div><label>Shift</label><select id="f-shift"><option value="">—</option><option>Day</option><option>Night</option><option>24h</option></select></div>
+          <div><label>Title (optional)</label><input type="text" id="f-title-daily" placeholder="Defaults to standard title" /></div>
+        </div>
+        <div id="header-eoj" class="grid-4" style="display:none;">
+          <div><label>Job start *</label><input type="date" id="f-period-start" /></div>
+          <div><label>Job end *</label><input type="date" id="f-period-end" /></div>
+          <div><label>Pad</label><input type="text" id="f-pad-eoj" placeholder="e.g. Bankhead" /></div>
+          <div><label>Well / Tank</label><input type="text" id="f-well-eoj" placeholder="e.g. 22-11W" /></div>
+          <div><label>Stages / Cycles</label><input type="text" id="f-stages" placeholder="e.g. 42 stages" /></div>
+          <div><label>Service type</label><input type="text" id="f-service-type" value="OTF" /></div>
+          <div><label>Job lead</label><input type="text" id="f-job-lead" placeholder="Name" /></div>
+          <div><label>Title (optional)</label><input type="text" id="f-title-eoj" placeholder="Defaults to standard title" /></div>
+        </div>
+      </div>
+
+      <!-- Water Chemistry -->
+      <div class="panel">
+        <h3>Water Chemistry <span id="wc-mode-label" style="font-size:10px; color:rgba(255,255,255,0.4); margin-left:8px;">— manual entry</span></h3>
+        <div class="telemetry-note">Telemetry auto-fill activates once Tanhee provides the service-account token. Until then, enter values manually.</div>
+
+        <div id="wc-daily" style="margin-top:12px;">
+          <table style="width:100%; border-collapse:collapse;">
+            <thead><tr style="font-size:10px; color:rgba(255,255,255,0.4); text-transform:uppercase;">
+              <th style="text-align:left; padding:8px 4px;">Parameter</th>
+              <th style="padding:8px 4px;">Inlet</th>
+              <th style="padding:8px 4px;">Outlet</th>
+              <th style="padding:8px 4px; text-align:left;">Notes</th>
+            </tr></thead>
+            <tbody>
+              <tr><td style="padding:6px 4px;">ORP (mV)</td><td><input type="number" id="wc-orp-in" step="1" /></td><td><input type="number" id="wc-orp-out" step="1" /></td><td><input type="text" id="wc-orp-notes" /></td></tr>
+              <tr><td style="padding:6px 4px;">pH</td><td><input type="number" id="wc-ph-in" step="0.01" /></td><td><input type="number" id="wc-ph-out" step="0.01" /></td><td><input type="text" id="wc-ph-notes" /></td></tr>
+              <tr><td style="padding:6px 4px;">TDS (ppm)</td><td><input type="number" id="wc-tds-in" step="1" /></td><td><input type="number" id="wc-tds-out" step="1" /></td><td><input type="text" id="wc-tds-notes" /></td></tr>
+              <tr><td style="padding:6px 4px;">Temp (°F)</td><td><input type="number" id="wc-temp-in" step="0.1" /></td><td><input type="number" id="wc-temp-out" step="0.1" /></td><td><input type="text" id="wc-temp-notes" /></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div id="wc-eoj" style="margin-top:12px; display:none;">
+          <table style="width:100%; border-collapse:collapse;">
+            <thead><tr style="font-size:10px; color:rgba(255,255,255,0.4); text-transform:uppercase;">
+              <th style="text-align:left; padding:8px 4px;">Parameter</th>
+              <th style="padding:8px 4px;">Min</th>
+              <th style="padding:8px 4px;">Avg</th>
+              <th style="padding:8px 4px;">Max</th>
+              <th style="padding:8px 4px; text-align:left;">Trend / Notes</th>
+            </tr></thead>
+            <tbody>
+              <tr><td style="padding:6px 4px;">ORP (mV)</td><td><input type="number" id="wc-orp-min" step="1" /></td><td><input type="number" id="wc-orp-avg" step="1" /></td><td><input type="number" id="wc-orp-max" step="1" /></td><td><input type="text" id="wc-orp-notes-eoj" /></td></tr>
+              <tr><td style="padding:6px 4px;">pH</td><td><input type="number" id="wc-ph-min" step="0.01" /></td><td><input type="number" id="wc-ph-avg" step="0.01" /></td><td><input type="number" id="wc-ph-max" step="0.01" /></td><td><input type="text" id="wc-ph-notes-eoj" /></td></tr>
+              <tr><td style="padding:6px 4px;">TDS (ppm)</td><td><input type="number" id="wc-tds-min" step="1" /></td><td><input type="number" id="wc-tds-avg" step="1" /></td><td><input type="number" id="wc-tds-max" step="1" /></td><td><input type="text" id="wc-tds-notes-eoj" /></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Chemical Dosing -->
+      <div class="panel">
+        <h3>Chemical Dosing</h3>
+        <div id="dosing-daily">
+          <div class="product-row" style="font-size:10px; color:rgba(255,255,255,0.4); text-transform:uppercase;">
+            <div>Product</div><div>Rate (GPH)</div><div>ppm</div><div>Gallons (24h)</div><div>Tank Level (%)</div><div>$ / Gal</div><div>Notes</div>
+          </div>
+          <div id="dosing-daily-rows"></div>
+        </div>
+        <div id="dosing-eoj" style="display:none;">
+          <div class="product-row" style="font-size:10px; color:rgba(255,255,255,0.4); text-transform:uppercase;">
+            <div>Product</div><div>Total Gallons</div><div>$ / Gal</div><div>Total Cost</div><div></div><div></div><div>Notes</div>
+          </div>
+          <div id="dosing-eoj-rows"></div>
+          <div style="margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.06);
+                      display:flex; justify-content:flex-end; gap:24px; font-size:13px;">
+            <div>Total gallons: <strong id="eoj-total-gal">0.0</strong></div>
+            <div>Total cost: <strong id="eoj-total-cost" style="color:#c9a356;">$0.00</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Narrative -->
+      <div class="panel">
+        <h3 id="narrative-heading">Field Notes</h3>
+        <div id="narrative-help" style="font-size:11px; color:rgba(255,255,255,0.4); margin-bottom:10px;">
+          What happened today, adjustments made, anomalies observed, next steps.
+        </div>
+        <textarea id="f-narrative" rows="8" placeholder="..." style="font-family:inherit;"></textarea>
+      </div>
+
+      <!-- Signer -->
+      <div class="panel">
+        <h3>Signature & Submission</h3>
+        <div class="grid-2">
+          <div><label>SCT representative name</label><input type="text" id="f-signer" placeholder="Name on signature line" /></div>
+          <div style="display:flex; align-items:flex-end;">
+            <label style="display:flex; align-items:center; gap:8px; text-transform:none; letter-spacing:0; font-size:13px; color:#e2e8f0;">
+              <input type="checkbox" id="f-visible" style="width:auto;" />
+              Visible to customer in Documents tab when published
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div id="builder-status" style="margin-top:8px; padding:8px 12px; font-size:12px; display:none;"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://bfpsvvojskrbzrhcuuwe.supabase.co";
+const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmcHN2dm9qc2tyYnpyaGN1dXdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMDY0NDAsImV4cCI6MjA5Mjg4MjQ0MH0.5QHKJgVMkiby7iNd7sfoDHb6LsR3BMO-a8R3k2F7vIs";
+
+const DEFAULT_PRODUCTS = [
+  { name: "TQ-20",   cost_per_gal: 8.95 },
+  { name: "SI-211",  cost_per_gal: 2.10 },
+  { name: "H2O2",    cost_per_gal: 15.10 },
+  { name: "Biocide", cost_per_gal: null },
+];
+
+let adminPw = null;
+let currentReport = null;
+let currentType = "daily";
+
+const $ = (id) => document.getElementById(id);
+const fmtMoney = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtNum = (n, d = 2) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const esc = (s) => (s == null ? "" : String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]));
+
+async function callAdmin(payload) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/reports-admin`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": ANON_KEY,
+      "Authorization": "Bearer " + ANON_KEY,
+      "x-admin-password": adminPw,
+    },
+    body: JSON.stringify(payload),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
+
+// ---------- Auth ----------
+$("auth-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pw = $("admin-password").value;
+  adminPw = pw;
+  try {
+    await callAdmin({ action: "list", customer_code: $("customer-select").value });
+    sessionStorage.setItem("sct_admin_pw", pw);
+    $("auth-gate").style.display = "none";
+    $("admin-ui").style.display = "block";
+    loadList();
+  } catch (e) {
+    adminPw = null;
+    const err = $("auth-error");
+    err.textContent = "Invalid password.";
+    err.style.display = "block";
+  }
+});
+
+// Auto-resume from sessionStorage (set by docs admin)
+(function tryResume() {
+  const pw = sessionStorage.getItem("sct_admin_pw");
+  if (!pw) return;
+  adminPw = pw;
+  callAdmin({ action: "list", customer_code: "DOUBLE_EAGLE" })
+    .then(() => {
+      $("auth-gate").style.display = "none";
+      $("admin-ui").style.display = "block";
+      loadList();
+    })
+    .catch(() => { adminPw = null; sessionStorage.removeItem("sct_admin_pw"); });
+})();
+
+// ---------- List view ----------
+$("customer-select").addEventListener("change", loadList);
+$("type-filter").addEventListener("change", loadList);
+
+async function loadList() {
+  const customer = $("customer-select").value;
+  const type = $("type-filter").value;
+  $("reports-list").innerHTML = '<div class="empty-state">Loading…</div>';
+  try {
+    const { reports } = await callAdmin({ action: "list", customer_code: customer, report_type: type || undefined });
+    if (!reports.length) {
+      $("reports-list").innerHTML = '<div class="empty-state">No reports yet. Click + New Daily or + New End-of-Job to create one.</div>';
+      return;
+    }
+    const rows = reports.map(r => {
+      const typePill = r.report_type === "daily" ? '<span class="pill pill-daily">Daily</span>' : '<span class="pill pill-eoj">End of Job</span>';
+      const statusPill = r.status === "published" ? '<span class="pill pill-published">Published</span>' : '<span class="pill pill-draft">Draft</span>';
+      const date = r.report_date || r.period_end || (r.created_at ? r.created_at.slice(0,10) : "—");
+      return `
+        <tr>
+          <td>${typePill}</td>
+          <td>${esc(date)}</td>
+          <td>${esc(r.pad || "—")} / ${esc(r.well || r.tank || "—")}</td>
+          <td>${esc(r.title || "—")}</td>
+          <td>${statusPill}</td>
+          <td>${esc(r.created_by || "—")}</td>
+          <td style="text-align:right; white-space:nowrap;">
+            <button class="btn-secondary" data-edit="${r.id}">Edit</button>
+            <button class="btn-secondary" data-preview="${r.id}">Preview</button>
+            <button class="btn-danger" data-delete="${r.id}">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+    $("reports-list").innerHTML = `
+      <table class="list">
+        <thead><tr><th>Type</th><th>Date</th><th>Pad / Well</th><th>Title</th><th>Status</th><th>Created by</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+    $("reports-list").querySelectorAll("[data-edit]").forEach(b => b.addEventListener("click", () => openBuilder(b.getAttribute("data-edit"))));
+    $("reports-list").querySelectorAll("[data-preview]").forEach(b => b.addEventListener("click", () => window.open(`/report.html?id=${b.getAttribute("data-preview")}&preview=1`, "_blank")));
+    $("reports-list").querySelectorAll("[data-delete]").forEach(b => b.addEventListener("click", () => deleteReport(b.getAttribute("data-delete"))));
+  } catch (e) {
+    $("reports-list").innerHTML = `<div class="empty-state" style="color:#ef4444;">${esc(e.message)}</div>`;
+  }
+}
+
+async function deleteReport(id) {
+  if (!confirm("Delete this report? This cannot be undone.")) return;
+  try { await callAdmin({ action: "delete", id }); loadList(); }
+  catch (e) { alert("Delete failed: " + e.message); }
+}
+
+// ---------- Builder ----------
+$("new-daily-btn").addEventListener("click", () => openBuilder(null, "daily"));
+$("new-eoj-btn").addEventListener("click", () => openBuilder(null, "eoj"));
+$("builder-back").addEventListener("click", () => {
+  $("builder-view").style.display = "none";
+  $("list-view").style.display = "block";
+  currentReport = null;
+  loadList();
+});
+
+function renderProductRows(type) {
+  const products = (currentReport && currentReport.data && currentReport.data.dosing && currentReport.data.dosing.products)
+    || DEFAULT_PRODUCTS.map(p => ({ ...p }));
+  const containerId = type === "daily" ? "dosing-daily-rows" : "dosing-eoj-rows";
+  const container = $(containerId);
+  container.innerHTML = "";
+  products.forEach((p, i) => {
+    const row = document.createElement("div");
+    row.className = "product-row";
+    if (type === "daily") {
+      row.innerHTML = `
+        <div class="prod-label">${esc(p.name)}</div>
+        <div><input type="number" step="0.01" data-prod="${i}" data-k="rate_gph" value="${p.rate_gph ?? ""}" /></div>
+        <div><input type="number" step="1"    data-prod="${i}" data-k="ppm"      value="${p.ppm ?? ""}" /></div>
+        <div><input type="number" step="0.1"  data-prod="${i}" data-k="gallons"  value="${p.gallons ?? ""}" /></div>
+        <div><input type="number" step="1"    data-prod="${i}" data-k="tank_level" value="${p.tank_level ?? ""}" /></div>
+        <div><input type="number" step="0.01" data-prod="${i}" data-k="cost_per_gal" value="${p.cost_per_gal ?? ""}" /></div>
+        <div><input type="text"                data-prod="${i}" data-k="notes"    value="${esc(p.notes || "")}" /></div>
+      `;
+    } else {
+      row.innerHTML = `
+        <div class="prod-label">${esc(p.name)}</div>
+        <div><input type="number" step="0.1"  data-prod="${i}" data-k="gallons"      value="${p.gallons ?? ""}" /></div>
+        <div><input type="number" step="0.01" data-prod="${i}" data-k="cost_per_gal" value="${p.cost_per_gal ?? ""}" /></div>
+        <div style="padding:10px 12px; font-variant-numeric: tabular-nums; color:#c9a356;" data-totalcell="${i}">$0.00</div>
+        <div></div>
+        <div></div>
+        <div><input type="text"                data-prod="${i}" data-k="notes"        value="${esc(p.notes || "")}" /></div>
+      `;
+    }
+    container.appendChild(row);
+  });
+  if (type === "eoj") recomputeEojTotals();
+  container.querySelectorAll("input[data-prod]").forEach(inp => {
+    inp.addEventListener("input", () => {
+      if (currentType === "eoj") recomputeEojTotals();
+    });
+  });
+}
+
+function recomputeEojTotals() {
+  const inputs = $("dosing-eoj-rows").querySelectorAll("input[data-prod]");
+  const products = {};
+  inputs.forEach(inp => {
+    const i = inp.getAttribute("data-prod");
+    const k = inp.getAttribute("data-k");
+    if (!products[i]) products[i] = {};
+    products[i][k] = inp.value;
+  });
+  let totalGal = 0, totalCost = 0;
+  Object.entries(products).forEach(([i, p]) => {
+    const gal = Number(p.gallons || 0);
+    const cpg = Number(p.cost_per_gal || 0);
+    const line = gal * cpg;
+    totalGal += gal;
+    totalCost += line;
+    const cell = $("dosing-eoj-rows").querySelector(`[data-totalcell="${i}"]`);
+    if (cell) cell.textContent = fmtMoney(line);
+  });
+  $("eoj-total-gal").textContent = fmtNum(totalGal, 1);
+  $("eoj-total-cost").textContent = fmtMoney(totalCost);
+}
+
+function setType(type) {
+  currentType = type;
+  const isDaily = type === "daily";
+  $("builder-type-pill").className = "pill " + (isDaily ? "pill-daily" : "pill-eoj");
+  $("builder-type-pill").textContent = isDaily ? "DAILY" : "END OF JOB";
+  $("header-daily").style.display = isDaily ? "grid" : "none";
+  $("header-eoj").style.display   = isDaily ? "none" : "grid";
+  $("wc-daily").style.display     = isDaily ? "block" : "none";
+  $("wc-eoj").style.display       = isDaily ? "none" : "block";
+  $("dosing-daily").style.display = isDaily ? "block" : "none";
+  $("dosing-eoj").style.display   = isDaily ? "none" : "block";
+  $("narrative-heading").textContent = isDaily ? "Field Notes" : "Recommendations & Lessons Learned";
+  $("narrative-help").textContent = isDaily
+    ? "What happened today, adjustments made, anomalies observed, next steps."
+    : "What worked, what to change next time, formulation tweaks, ops recommendations.";
+  $("f-narrative").placeholder = isDaily
+    ? "8 AM site check: ORP holding at 425 mV, TQ-20 at 4.2 GPH, no issues..."
+    : "Job ran clean. Recommend dropping TQ-20 by 5% next pad, biocide held through 32 stages...";
+  renderProductRows(type);
+}
+
+function openBuilder(id, type) {
+  $("list-view").style.display = "none";
+  $("builder-view").style.display = "block";
+  // Clear status
+  $("builder-status").style.display = "none";
+
+  if (id) {
+    // Load existing
+    $("builder-title").textContent = "Loading…";
+    callAdmin({ action: "get", id }).then(({ report }) => {
+      currentReport = report;
+      setType(report.report_type);
+      hydrate(report);
+      $("builder-title").textContent = report.title || (report.report_type === "daily" ? "Daily report" : "End-of-job report");
+      $("builder-status-pill").className = "pill " + (report.status === "published" ? "pill-published" : "pill-draft");
+      $("builder-status-pill").textContent = report.status === "published" ? "PUBLISHED" : "DRAFT";
+      $("builder-preview").disabled = false;
+      $("builder-publish").disabled = false;
+    }).catch(e => { alert("Failed to load: " + e.message); $("builder-back").click(); });
+  } else {
+    currentReport = null;
+    setType(type);
+    clearForm();
+    $("builder-title").textContent = type === "daily" ? "New daily report" : "New end-of-job report";
+    $("builder-status-pill").className = "pill pill-draft";
+    $("builder-status-pill").textContent = "DRAFT";
+    $("builder-preview").disabled = true;
+    $("builder-publish").disabled = true;
+    // Default today's date
+    if (type === "daily") {
+      $("f-report-date").valueAsDate = new Date();
+    } else {
+      $("f-period-end").valueAsDate = new Date();
+    }
+  }
+}
+
+function clearForm() {
+  document.querySelectorAll("#builder-view input, #builder-view textarea, #builder-view select").forEach(el => {
+    if (el.type === "checkbox") el.checked = false;
+    else el.value = el.id === "f-service-type" ? "OTF" : "";
+  });
+  renderProductRows(currentType);
+}
+
+function hydrate(r) {
+  const d = r.data || {};
+  const wc = d.water_chemistry || {};
+  if (r.report_type === "daily") {
+    $("f-report-date").value = r.report_date || "";
+    $("f-pad").value = r.pad || "";
+    $("f-well").value = r.well || r.tank || "";
+    $("f-technician").value = d.technician || r.created_by || "";
+    $("f-weather").value = d.weather || "";
+    $("f-shift").value = d.shift || "";
+    $("f-title-daily").value = r.title || "";
+    $("wc-orp-in").value = wc.orp_inlet ?? "";
+    $("wc-orp-out").value = wc.orp_outlet ?? "";
+    $("wc-orp-notes").value = wc.orp_notes || "";
+    $("wc-ph-in").value = wc.ph_inlet ?? "";
+    $("wc-ph-out").value = wc.ph_outlet ?? "";
+    $("wc-ph-notes").value = wc.ph_notes || "";
+    $("wc-tds-in").value = wc.tds_inlet ?? "";
+    $("wc-tds-out").value = wc.tds_outlet ?? "";
+    $("wc-tds-notes").value = wc.tds_notes || "";
+    $("wc-temp-in").value = wc.temp_inlet ?? "";
+    $("wc-temp-out").value = wc.temp_outlet ?? "";
+    $("wc-temp-notes").value = wc.temp_notes || "";
+    $("f-narrative").value = d.narrative || "";
+  } else {
+    $("f-period-start").value = r.period_start || "";
+    $("f-period-end").value = r.period_end || "";
+    $("f-pad-eoj").value = r.pad || "";
+    $("f-well-eoj").value = r.well || r.tank || "";
+    $("f-stages").value = d.stages || "";
+    $("f-service-type").value = d.service_type || "OTF";
+    $("f-job-lead").value = d.job_lead || r.created_by || "";
+    $("f-title-eoj").value = r.title || "";
+    $("wc-orp-min").value = wc.orp_min ?? "";
+    $("wc-orp-avg").value = wc.orp_avg ?? "";
+    $("wc-orp-max").value = wc.orp_max ?? "";
+    $("wc-orp-notes-eoj").value = wc.orp_notes || "";
+    $("wc-ph-min").value = wc.ph_min ?? "";
+    $("wc-ph-avg").value = wc.ph_avg ?? "";
+    $("wc-ph-max").value = wc.ph_max ?? "";
+    $("wc-ph-notes-eoj").value = wc.ph_notes || "";
+    $("wc-tds-min").value = wc.tds_min ?? "";
+    $("wc-tds-avg").value = wc.tds_avg ?? "";
+    $("wc-tds-max").value = wc.tds_max ?? "";
+    $("wc-tds-notes-eoj").value = wc.tds_notes || "";
+    $("f-narrative").value = d.recommendations || "";
+  }
+  $("f-signer").value = d.signer_name || "";
+  $("f-visible").checked = r.visible_to_customer;
+}
+
+function collectPayload() {
+  const customer_code = $("customer-select").value;
+  const isDaily = currentType === "daily";
+  const products = [];
+  const containerId = isDaily ? "dosing-daily-rows" : "dosing-eoj-rows";
+  const labels = $(containerId).querySelectorAll(".prod-label");
+  labels.forEach((label, i) => {
+    const p = { name: label.textContent, notes: "" };
+    $(containerId).querySelectorAll(`[data-prod="${i}"]`).forEach(inp => {
+      const k = inp.getAttribute("data-k");
+      const v = inp.value;
+      p[k] = v === "" ? null : (inp.type === "number" ? Number(v) : v);
+    });
+    products.push(p);
+  });
+
+  if (isDaily) {
+    return {
+      customer_code, report_type: "daily",
+      report_date: $("f-report-date").value || null,
+      pad: $("f-pad").value || null,
+      well: $("f-well").value || null,
+      title: $("f-title-daily").value || null,
+      created_by: $("f-technician").value || null,
+      visible_to_customer: $("f-visible").checked,
+      data: {
+        technician: $("f-technician").value || null,
+        weather: $("f-weather").value || null,
+        shift: $("f-shift").value || null,
+        water_chemistry: {
+          orp_inlet: $("wc-orp-in").value || null,
+          orp_outlet: $("wc-orp-out").value || null,
+          orp_notes: $("wc-orp-notes").value || null,
+          ph_inlet: $("wc-ph-in").value || null,
+          ph_outlet: $("wc-ph-out").value || null,
+          ph_notes: $("wc-ph-notes").value || null,
+          tds_inlet: $("wc-tds-in").value || null,
+          tds_outlet: $("wc-tds-out").value || null,
+          tds_notes: $("wc-tds-notes").value || null,
+          temp_inlet: $("wc-temp-in").value || null,
+          temp_outlet: $("wc-temp-out").value || null,
+          temp_notes: $("wc-temp-notes").value || null,
+        },
+        dosing: { products },
+        narrative: $("f-narrative").value || null,
+        signer_name: $("f-signer").value || null,
+      },
+    };
+  } else {
+    return {
+      customer_code, report_type: "eoj",
+      period_start: $("f-period-start").value || null,
+      period_end: $("f-period-end").value || null,
+      report_date: $("f-period-end").value || null,
+      pad: $("f-pad-eoj").value || null,
+      well: $("f-well-eoj").value || null,
+      title: $("f-title-eoj").value || null,
+      created_by: $("f-job-lead").value || null,
+      visible_to_customer: $("f-visible").checked,
+      data: {
+        stages: $("f-stages").value || null,
+        service_type: $("f-service-type").value || null,
+        job_lead: $("f-job-lead").value || null,
+        water_chemistry: {
+          orp_min: $("wc-orp-min").value || null,
+          orp_avg: $("wc-orp-avg").value || null,
+          orp_max: $("wc-orp-max").value || null,
+          orp_notes: $("wc-orp-notes-eoj").value || null,
+          ph_min: $("wc-ph-min").value || null,
+          ph_avg: $("wc-ph-avg").value || null,
+          ph_max: $("wc-ph-max").value || null,
+          ph_notes: $("wc-ph-notes-eoj").value || null,
+          tds_min: $("wc-tds-min").value || null,
+          tds_avg: $("wc-tds-avg").value || null,
+          tds_max: $("wc-tds-max").value || null,
+          tds_notes: $("wc-tds-notes-eoj").value || null,
+        },
+        dosing: { products },
+        recommendations: $("f-narrative").value || null,
+        signer_name: $("f-signer").value || null,
+      },
+    };
+  }
+}
+
+function showStatus(msg, kind) {
+  const el = $("builder-status");
+  el.style.display = "block";
+  el.textContent = msg;
+  if (kind === "error") {
+    el.style.background = "rgba(239,68,68,0.1)"; el.style.border = "1px solid rgba(239,68,68,0.3)"; el.style.color = "#ef4444"; el.style.borderRadius = "6px";
+  } else {
+    el.style.background = "rgba(16,185,129,0.1)"; el.style.border = "1px solid rgba(16,185,129,0.3)"; el.style.color = "#10b981"; el.style.borderRadius = "6px";
+  }
+  setTimeout(() => { el.style.display = "none"; }, 4000);
+}
+
+$("builder-save").addEventListener("click", async () => {
+  const payload = collectPayload();
+  $("builder-save").disabled = true;
+  try {
+    if (currentReport) {
+      const { report } = await callAdmin({ action: "update", id: currentReport.id, ...payload });
+      currentReport = report;
+      showStatus("Draft saved.");
+    } else {
+      const { report } = await callAdmin({ action: "create", ...payload });
+      currentReport = report;
+      $("builder-preview").disabled = false;
+      $("builder-publish").disabled = false;
+      showStatus("Draft created. You can now preview or publish.");
+    }
+  } catch (e) {
+    showStatus("Save failed: " + e.message, "error");
+  } finally {
+    $("builder-save").disabled = false;
+  }
+});
+
+$("builder-preview").addEventListener("click", () => {
+  if (!currentReport) return;
+  window.open(`/report.html?id=${currentReport.id}&preview=1`, "_blank");
+});
+
+$("builder-publish").addEventListener("click", async () => {
+  if (!currentReport) return;
+  if (!confirm("Publish this report? Customers with 'visible' checked will see it in their Documents tab.")) return;
+  $("builder-publish").disabled = true;
+  try {
+    // Save first to capture latest edits
+    const payload = collectPayload();
+    await callAdmin({ action: "update", id: currentReport.id, ...payload });
+    const { report } = await callAdmin({ action: "publish", id: currentReport.id, visible_to_customer: $("f-visible").checked });
+    currentReport = report;
+    $("builder-status-pill").className = "pill pill-published";
+    $("builder-status-pill").textContent = "PUBLISHED";
+    showStatus("Report published.");
+  } catch (e) {
+    showStatus("Publish failed: " + e.message, "error");
+  } finally {
+    $("builder-publish").disabled = false;
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SCT Completion Report</title>
+<style>
+  :root {
+    --sct-navy: #0b1d3a;
+    --sct-blue: #1e3a8a;
+    --sct-gold: #c9a356;
+    --ink: #0f172a;
+    --muted: #475569;
+    --line: #cbd5e1;
+    --bg: #f8fafc;
+    --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 24px 32px 64px; }
+  .toolbar { display: flex; gap: 8px; justify-content: flex-end; padding: 8px 0 16px; }
+  .toolbar button {
+    background: var(--sct-navy); color: #fff; border: 0; padding: 8px 16px; border-radius: 6px;
+    font-size: 13px; font-weight: 600; cursor: pointer; letter-spacing: 0.3px;
+  }
+  .toolbar button.secondary { background: #fff; color: var(--sct-navy); border: 1px solid var(--line); }
+  .toolbar button:hover { opacity: 0.9; }
+
+  .sheet {
+    background: var(--card); padding: 48px 56px; border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  }
+  .letterhead {
+    border-bottom: 3px solid var(--sct-gold);
+    padding-bottom: 16px; margin-bottom: 24px;
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;
+  }
+  .brand { display: flex; align-items: center; gap: 14px; }
+  .logo-mark {
+    width: 56px; height: 56px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--sct-navy), var(--sct-blue));
+    color: var(--sct-gold); display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 22px; letter-spacing: 0.5px;
+  }
+  .brand-text .name { font-size: 18px; font-weight: 800; color: var(--sct-navy); letter-spacing: 1px; }
+  .brand-text .tag { font-size: 11px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; }
+  .contact { text-align: right; font-size: 11px; color: var(--muted); line-height: 1.6; }
+  .contact .strong { color: var(--ink); font-weight: 600; }
+
+  h1.report-title {
+    font-size: 22px; margin: 8px 0 4px; color: var(--sct-navy); letter-spacing: 0.3px;
+  }
+  .report-subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .badge {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    padding: 3px 8px; border-radius: 3px; text-transform: uppercase; vertical-align: middle;
+    background: var(--sct-gold); color: var(--sct-navy); margin-left: 8px;
+  }
+  .badge.draft { background: #fde68a; color: #78350f; }
+
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 24px;
+    background: #f1f5f9; padding: 14px 18px; border-radius: 4px; margin-bottom: 24px;
+  }
+  .meta-grid .item .label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .meta-grid .item .value { font-size: 13px; font-weight: 600; color: var(--ink); margin-top: 2px; }
+
+  section.block { margin-bottom: 28px; }
+  section.block h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--sct-navy); border-bottom: 1px solid var(--line);
+    padding-bottom: 6px; margin: 0 0 12px;
+  }
+
+  table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.data th, table.data td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  table.data th { background: #f1f5f9; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+  table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.data tr.total td { font-weight: 700; background: #fef9e7; border-top: 2px solid var(--sct-gold); }
+
+  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; }
+  .kv .row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px dotted var(--line); }
+  .kv .row .k { color: var(--muted); }
+  .kv .row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .narrative { white-space: pre-wrap; font-size: 13px; line-height: 1.7; color: var(--ink); }
+  .empty { color: var(--muted); font-style: normal; font-size: 12px; }
+
+  .signature-block {
+    margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 32px; font-size: 12px;
+  }
+  .sig-line { border-bottom: 1px solid var(--ink); height: 28px; margin-top: 20px; }
+  .sig-caption { color: var(--muted); font-size: 11px; margin-top: 4px; }
+
+  .footer {
+    margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--line);
+    text-align: center; font-size: 10px; color: var(--muted);
+  }
+
+  .loading, .error { text-align: center; padding: 64px 24px; color: var(--muted); }
+  .error { color: #b91c1c; }
+
+  @media print {
+    body { background: #fff; }
+    .wrap { padding: 0; max-width: none; }
+    .toolbar { display: none; }
+    .sheet { box-shadow: none; padding: 24px 32px; border-radius: 0; }
+    section.block { page-break-inside: avoid; }
+    .letterhead, .meta-grid { page-break-after: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="toolbar">
+    <button class="secondary" onclick="window.history.length > 1 ? window.history.back() : window.close()">Back</button>
+    <button onclick="window.print()">Download PDF</button>
+  </div>
+  <div id="root" class="sheet">
+    <div class="loading">Loading report…</div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://bfpsvvojskrbzrhcuuwe.supabase.co";
+const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmcHN2dm9qc2tyYnpyaGN1dXdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMDY0NDAsImV4cCI6MjA5Mjg4MjQ0MH0.5QHKJgVMkiby7iNd7sfoDHb6LsR3BMO-a8R3k2F7vIs";
+
+function qs(name) { return new URLSearchParams(window.location.search).get(name); }
+function fmtDate(d) { if (!d) return "—"; try { return new Date(d + "T00:00:00").toLocaleDateString("en-US", { year:"numeric", month:"short", day:"numeric" }); } catch { return d; } }
+function fmtNum(n, decimals = 2) { if (n === null || n === undefined || n === "") return "—"; const v = Number(n); return isFinite(v) ? v.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) : "—"; }
+function fmtMoney(n) { if (n === null || n === undefined || n === "") return "—"; const v = Number(n); return isFinite(v) ? "$" + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"; }
+function esc(s) { if (s === null || s === undefined) return ""; return String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]); }
+
+const id = qs("id");
+const adminPreview = qs("preview") === "1";
+const adminPw = adminPreview ? sessionStorage.getItem("sct_admin_pw") : null;
+
+async function loadReport() {
+  if (!id) return renderError("Missing report id in URL.");
+  try {
+    const endpoint = adminPreview ? "reports-admin" : "reports-get";
+    const fetchOpts = {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": ANON_KEY, "Authorization": "Bearer " + ANON_KEY },
+      body: JSON.stringify(adminPreview ? { action: "get", id } : { id }),
+    };
+    if (adminPreview && adminPw) fetchOpts.headers["x-admin-password"] = adminPw;
+
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/${endpoint}`, fetchOpts);
+    const json = await res.json();
+    if (!res.ok) return renderError(json.error || "Failed to load report");
+    render(json.report);
+  } catch (e) {
+    renderError(String(e));
+  }
+}
+
+function renderError(msg) {
+  document.getElementById("root").innerHTML = `<div class="error">${esc(msg)}</div>`;
+}
+
+function render(r) {
+  const isDraft = r.status !== "published";
+  const customer = r.customers || {};
+  const data = r.data || {};
+  const isDaily = r.report_type === "daily";
+  const typeLabel = isDaily ? "Daily Treatment Report" : "End-of-Job Completion Report";
+  const title = r.title || `${typeLabel} — ${customer.display_name || customer.code || ""}`;
+  document.title = `${title} — SCT`;
+
+  let html = `
+    <div class="letterhead">
+      <div class="brand">
+        <div class="logo-mark">SCT</div>
+        <div class="brand-text">
+          <div class="name">SUPREME CHEMICAL TECHNOLOGY</div>
+          <div class="tag">Production · Completion · Specialty Treatments</div>
+        </div>
+      </div>
+      <div class="contact">
+        <div class="strong">Midland, Texas</div>
+        <div>(432) 701-0318</div>
+        <div>supreme-otf.com</div>
+      </div>
+    </div>
+
+    <h1 class="report-title">${esc(title)}${isDraft ? '<span class="badge draft">Draft Preview</span>' : '<span class="badge">Final</span>'}</h1>
+    <div class="report-subtitle">Prepared for ${esc(customer.display_name || customer.code || "—")}</div>
+
+    <div class="meta-grid">
+      ${isDaily ? `
+        <div class="item"><div class="label">Report Date</div><div class="value">${fmtDate(r.report_date)}</div></div>
+        <div class="item"><div class="label">Pad</div><div class="value">${esc(r.pad || "—")}</div></div>
+        <div class="item"><div class="label">Well / Tank</div><div class="value">${esc(r.well || r.tank || "—")}</div></div>
+        <div class="item"><div class="label">Technician</div><div class="value">${esc(data.technician || r.created_by || "—")}</div></div>
+        <div class="item" style="grid-column: span 2"><div class="label">Weather</div><div class="value">${esc(data.weather || "—")}</div></div>
+        <div class="item"><div class="label">Shift</div><div class="value">${esc(data.shift || "—")}</div></div>
+        <div class="item"><div class="label">Report ID</div><div class="value" style="font-family:ui-monospace,monospace;font-size:11px">${esc((r.id||"").slice(0,8))}</div></div>
+      ` : `
+        <div class="item"><div class="label">Job Start</div><div class="value">${fmtDate(r.period_start)}</div></div>
+        <div class="item"><div class="label">Job End</div><div class="value">${fmtDate(r.period_end)}</div></div>
+        <div class="item"><div class="label">Pad</div><div class="value">${esc(r.pad || "—")}</div></div>
+        <div class="item"><div class="label">Well / Tank</div><div class="value">${esc(r.well || r.tank || "—")}</div></div>
+        <div class="item"><div class="label">Stages / Cycles</div><div class="value">${esc(data.stages || "—")}</div></div>
+        <div class="item"><div class="label">Service Type</div><div class="value">${esc(data.service_type || "OTF")}</div></div>
+        <div class="item"><div class="label">Job Lead</div><div class="value">${esc(data.job_lead || r.created_by || "—")}</div></div>
+        <div class="item"><div class="label">Report ID</div><div class="value" style="font-family:ui-monospace,monospace;font-size:11px">${esc((r.id||"").slice(0,8))}</div></div>
+      `}
+    </div>
+  `;
+
+  // Water chemistry block
+  const wc = data.water_chemistry || {};
+  if (isDaily) {
+    html += `
+      <section class="block">
+        <h2>Water Chemistry Snapshot</h2>
+        <table class="data">
+          <thead><tr><th>Parameter</th><th class="num">Inlet</th><th class="num">Outlet</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>ORP (mV)</td><td class="num">${fmtNum(wc.orp_inlet, 0)}</td><td class="num">${fmtNum(wc.orp_outlet, 0)}</td><td>${esc(wc.orp_notes || "")}</td></tr>
+            <tr><td>pH</td><td class="num">${fmtNum(wc.ph_inlet, 2)}</td><td class="num">${fmtNum(wc.ph_outlet, 2)}</td><td>${esc(wc.ph_notes || "")}</td></tr>
+            <tr><td>TDS (ppm)</td><td class="num">${fmtNum(wc.tds_inlet, 0)}</td><td class="num">${fmtNum(wc.tds_outlet, 0)}</td><td>${esc(wc.tds_notes || "")}</td></tr>
+            <tr><td>Temperature (°F)</td><td class="num">${fmtNum(wc.temp_inlet, 1)}</td><td class="num">${fmtNum(wc.temp_outlet, 1)}</td><td>${esc(wc.temp_notes || "")}</td></tr>
+          </tbody>
+        </table>
+      </section>
+    `;
+  } else {
+    html += `
+      <section class="block">
+        <h2>Water Chemistry Performance — Run Trends</h2>
+        <table class="data">
+          <thead><tr><th>Parameter</th><th class="num">Min</th><th class="num">Avg</th><th class="num">Max</th><th>Trend / Notes</th></tr></thead>
+          <tbody>
+            <tr><td>ORP (mV)</td><td class="num">${fmtNum(wc.orp_min, 0)}</td><td class="num">${fmtNum(wc.orp_avg, 0)}</td><td class="num">${fmtNum(wc.orp_max, 0)}</td><td>${esc(wc.orp_notes || "")}</td></tr>
+            <tr><td>pH</td><td class="num">${fmtNum(wc.ph_min, 2)}</td><td class="num">${fmtNum(wc.ph_avg, 2)}</td><td class="num">${fmtNum(wc.ph_max, 2)}</td><td>${esc(wc.ph_notes || "")}</td></tr>
+            <tr><td>TDS (ppm)</td><td class="num">${fmtNum(wc.tds_min, 0)}</td><td class="num">${fmtNum(wc.tds_avg, 0)}</td><td class="num">${fmtNum(wc.tds_max, 0)}</td><td>${esc(wc.tds_notes || "")}</td></tr>
+          </tbody>
+        </table>
+      </section>
+    `;
+  }
+
+  // Chemical dosing block
+  const dosing = data.dosing || {};
+  const products = (dosing.products && dosing.products.length) ? dosing.products : [
+    { name: "TQ-20", rate_gph: null, ppm: null, gallons: null, cost_per_gal: 8.95, notes: "" },
+    { name: "SI-211", rate_gph: null, ppm: null, gallons: null, cost_per_gal: 2.10, notes: "" },
+    { name: "H2O2", rate_gph: null, ppm: null, gallons: null, cost_per_gal: 15.10, notes: "" },
+    { name: "Biocide", rate_gph: null, ppm: null, gallons: null, cost_per_gal: null, notes: "" },
+  ];
+
+  if (isDaily) {
+    html += `
+      <section class="block">
+        <h2>Chemical Pump Rates & 24h Consumption</h2>
+        <table class="data">
+          <thead><tr><th>Product</th><th class="num">Rate (GPH)</th><th class="num">ppm</th><th class="num">Gallons (24h)</th><th class="num">Tank Level</th><th>Notes</th></tr></thead>
+          <tbody>
+            ${products.map(p => `
+              <tr>
+                <td><strong>${esc(p.name)}</strong></td>
+                <td class="num">${fmtNum(p.rate_gph, 2)}</td>
+                <td class="num">${fmtNum(p.ppm, 0)}</td>
+                <td class="num">${fmtNum(p.gallons, 1)}</td>
+                <td class="num">${p.tank_level != null ? fmtNum(p.tank_level, 0) + "%" : "—"}</td>
+                <td>${esc(p.notes || "")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </section>
+    `;
+  } else {
+    const totalCost = products.reduce((s, p) => s + (Number(p.gallons || 0) * Number(p.cost_per_gal || 0)), 0);
+    const totalGals = products.reduce((s, p) => s + Number(p.gallons || 0), 0);
+    html += `
+      <section class="block">
+        <h2>Total Chemical Consumed & Cost Breakdown</h2>
+        <table class="data">
+          <thead><tr><th>Product</th><th class="num">Gallons</th><th class="num">$ / Gal</th><th class="num">Total Cost</th><th>Notes</th></tr></thead>
+          <tbody>
+            ${products.map(p => `
+              <tr>
+                <td><strong>${esc(p.name)}</strong></td>
+                <td class="num">${fmtNum(p.gallons, 1)}</td>
+                <td class="num">${fmtMoney(p.cost_per_gal)}</td>
+                <td class="num">${fmtMoney(Number(p.gallons || 0) * Number(p.cost_per_gal || 0))}</td>
+                <td>${esc(p.notes || "")}</td>
+              </tr>
+            `).join("")}
+            <tr class="total">
+              <td>JOB TOTAL</td>
+              <td class="num">${fmtNum(totalGals, 1)}</td>
+              <td class="num"></td>
+              <td class="num">${fmtMoney(totalCost)}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    `;
+  }
+
+  // Narrative
+  if (isDaily) {
+    html += `
+      <section class="block">
+        <h2>Field Notes — What Happened, Adjustments, Anomalies, Next Steps</h2>
+        <div class="narrative">${esc(data.narrative || "—")}</div>
+      </section>
+    `;
+  } else {
+    html += `
+      <section class="block">
+        <h2>Recommendations & Lessons Learned</h2>
+        <div class="narrative">${esc(data.recommendations || "—")}</div>
+      </section>
+    `;
+  }
+
+  // Signature
+  html += `
+    <div class="signature-block">
+      <div>
+        <div class="sig-line"></div>
+        <div class="sig-caption">SCT Representative · ${esc(data.signer_name || r.created_by || "")}</div>
+      </div>
+      <div>
+        <div class="sig-line"></div>
+        <div class="sig-caption">Date</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      © 2026 Supreme Chemical Technology · Midland, TX · (432) 701-0318 · Proprietary and confidential
+      <br/>Report generated ${new Date(r.created_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}${r.updated_at && r.updated_at !== r.created_at ? " · Last updated " + new Date(r.updated_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : ""}
+    </div>
+  `;
+
+  document.getElementById("root").innerHTML = html;
+}
+
+loadReport();
+</script>
+</body>
+</html>
