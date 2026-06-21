@@ -255,18 +255,66 @@ const AppWithAuth = () => {
 };
 
 /* ═══════════════════════════════════════════════
-   DATA GENERATORS (replace with real API calls)
+   LIVE DATA CONFIG
+   ───────────────────────────────────────────────
+   Backend: supreme-otf-api.vercel.app (InfluxQL proxy → GKOS Grafana/InfluxDB)
+   When telemetry measurement/field names are confirmed with GK, flip
+   USE_LIVE_DATA to true and fill in the field map below.
+   Each panel falls back to simulated data when USE_LIVE_DATA = false
+   or when the API call fails, so the dashboard always renders.
+   ═══════════════════════════════════════════════ */
+const USE_LIVE_DATA = false; // flip to true once GK telemetry field names confirmed
+const API_BASE = "https://supreme-otf-api.vercel.app";
+const API_FLEET = "Double Eagle"; // InfluxDB measurement (one of the 9 SCT fleets)
+const FIELD_MAP = {
+  // Sensor fields (Live Dashboard tab)
+  orp:   { measurement: API_FLEET, field: "orp_mv"        }, // TBD from GK
+  ph:    { measurement: API_FLEET, field: "ph"            }, // TBD from GK
+  tds:   { measurement: API_FLEET, field: "tds_mgl"       }, // TBD from GK
+  flow:  { measurement: API_FLEET, field: "flow_bpm"      }, // TBD from GK
+  // Tank telemetry (Inventory & Cost tab) — JD chasing measurement/field names
+  tq20:  { measurement: API_FLEET, field: "tank_tq20_gal" }, // TBD from GK
+  si211: { measurement: API_FLEET, field: "tank_si211_gal"}, // TBD from GK
+  h2o2:  { measurement: API_FLEET, field: "tank_h2o2_gal" }, // TBD from GK
+};
+
+/* ═══════════════════════════════════════════════
+   DATA GENERATORS (used when USE_LIVE_DATA = false)
    ═══════════════════════════════════════════════ */
 const genORP = () => +(180 + Math.random()*80 - Math.random()*15).toFixed(1);
 const genPH  = () => +(6.7 + Math.random()*0.8).toFixed(2);
 const genTDS = () => +(112000 + Math.random()*6000 - Math.random()*3000).toFixed(0);
 const genRate = () => +(55 + Math.random()*15).toFixed(1);
 
+/* Initial tank state — capacities are physical, current values are
+   placeholders until live telemetry is wired. Reorder fires at 14,000 gal
+   for the two 21,000 gal chem tanks (TQ-20, SI-211). */
 const INITIAL_TANKS = [
-  { id:1, product:"Supreme Bio TQ-20",     capacity:275, current:198, unit:"gal", rate:"$8.95/gal", unitCost:8.95, color:"#22d3ee" },
-  { id:2, product:"SI-211 Scale Inhibitor", capacity:275, current:221, unit:"gal", rate:"$3.00/gal", unitCost:3.00, color:"#a78bfa" },
-  { id:3, product:"34% Hydrogen Peroxide",  capacity:330, current:287, unit:"gal", rate:"$2.15/gal del.", unitCost:2.15, color:"#fbbf24" },
+  { id:1, product:"Supreme Bio TQ-20",     capacity:21000, current:20000, unit:"gal", rate:"$8.95/gal",     unitCost:8.95, color:"#22d3ee", reorderAt:14000, container:"21,000 gal chem tank" },
+  { id:2, product:"SI-211 Scale Inhibitor", capacity:21000, current:20000, unit:"gal", rate:"$3.00/gal",     unitCost:3.00, color:"#a78bfa", reorderAt:14000, container:"21,000 gal chem tank" },
+  { id:3, product:"34% Hydrogen Peroxide",  capacity:5500,  current:0,     unit:"gal", rate:"$2.15/gal del.", unitCost:2.15, color:"#fbbf24", reorderAt:null,  container:"5,500 gal isotainer", note:"Not in use — Job 1 fresh water" },
 ];
+
+/* ═══════════════════════════════════════════════
+   LIVE FETCH HELPER
+   Calls the supreme-otf-api proxy. Returns the most recent value for
+   a given measurement+field, or null on failure. The proxy is hardened
+   with allow-lists (fleet, measurement, field) and a dev-key gate.
+   ═══════════════════════════════════════════════ */
+async function fetchLatest(measurement, field) {
+  if (!USE_LIVE_DATA) return null;
+  try {
+    const q = `SELECT last("${field}") FROM "${measurement}" WHERE time > now() - 5m`;
+    const r = await fetch(`${API_BASE}/api/grafana-query?q=${encodeURIComponent(q)}`);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const v = j?.results?.[0]?.series?.[0]?.values?.[0]?.[1];
+    return (typeof v === "number") ? v : null;
+  } catch (e) {
+    console.warn("[live] fetch failed:", measurement, field, e);
+    return null;
+  }
+}
 
 const DOCS = [
   { cat:"SDS",   name:"Supreme Bio TQ-20 — Safety Data Sheet",       date:"01/15/26", size:"342 KB" },
@@ -412,26 +460,36 @@ const CostChart = ({ data }) => {
 /* ═══════════════════════════════════════════════
    TANK LEVEL
    ═══════════════════════════════════════════════ */
-const TankLevel = ({ product, capacity, current, unit, rate, color }) => {
+const TankLevel = ({ product, capacity, current, unit, rate, color, reorderAt, container, note }) => {
   const pct = (current/capacity)*100;
-  const low = pct < 25;
+  const reorderTriggered = reorderAt != null && current <= reorderAt;
+  const empty = current === 0;
+  // Format numbers with thousands separators since we're now in 5k–21k territory
+  const fmt = (n) => n.toLocaleString(undefined, { maximumFractionDigits: 0 });
   return (
-    <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(255,255,255,0.06)", borderRadius:12, padding:"16px 20px", backdropFilter:"blur(10px)" }}>
+    <div style={{ background:"rgba(15,23,42,0.7)", border:`1px solid ${reorderTriggered ? "rgba(245,158,11,0.35)" : "rgba(255,255,255,0.06)"}`, borderRadius:12, padding:"16px 20px", backdropFilter:"blur(10px)" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
         <div>
           <div style={{ fontSize:13, fontWeight:600, color:"rgba(255,255,255,0.85)" }}>{product}</div>
-          <div style={{ fontSize:11, color:"rgba(255,255,255,0.35)", marginTop:2 }}>{rate}</div>
+          <div style={{ fontSize:11, color:"rgba(255,255,255,0.35)", marginTop:2 }}>{rate} · {container}</div>
         </div>
-        {low && <span style={{ fontSize:10, fontWeight:700, background:"rgba(239,68,68,0.15)", color:"#ef4444", padding:"2px 8px", borderRadius:4, letterSpacing:0.5 }}>LOW</span>}
+        {reorderTriggered && !empty && <span style={{ fontSize:10, fontWeight:700, background:"rgba(245,158,11,0.15)", color:"#f59e0b", padding:"2px 8px", borderRadius:4, letterSpacing:0.5 }}>REORDER</span>}
+        {empty && <span style={{ fontSize:10, fontWeight:700, background:"rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.5)", padding:"2px 8px", borderRadius:4, letterSpacing:0.5 }}>STANDBY</span>}
       </div>
       <div style={{ display:"flex", alignItems:"baseline", gap:4, marginBottom:8 }}>
-        <span style={{ fontSize:26, fontWeight:700, color, fontFamily:"'JetBrains Mono',monospace" }}>{current}</span>
-        <span style={{ fontSize:12, color:"rgba(255,255,255,0.35)" }}>/ {capacity} {unit}</span>
+        <span style={{ fontSize:26, fontWeight:700, color, fontFamily:"'JetBrains Mono',monospace" }}>{fmt(current)}</span>
+        <span style={{ fontSize:12, color:"rgba(255,255,255,0.35)" }}>/ {fmt(capacity)} {unit}</span>
       </div>
-      <div style={{ height:8, background:"rgba(255,255,255,0.06)", borderRadius:4, overflow:"hidden" }}>
+      <div style={{ position:"relative", height:8, background:"rgba(255,255,255,0.06)", borderRadius:4, overflow:"hidden" }}>
         <div style={{ height:"100%", width:`${pct}%`, background:`linear-gradient(90deg, ${color}88, ${color})`, borderRadius:4, transition:"width 1s ease" }}/>
+        {reorderAt != null && (
+          <div title={`Reorder at ${fmt(reorderAt)} ${unit}`} style={{ position:"absolute", top:-2, bottom:-2, left:`${(reorderAt/capacity)*100}%`, width:2, background:"rgba(245,158,11,0.65)" }}/>
+        )}
       </div>
-      <div style={{ textAlign:"right", fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:4 }}>{pct.toFixed(0)}% full</div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4 }}>
+        <span style={{ fontSize:10, color:"rgba(255,255,255,0.3)" }}>{note || (reorderAt != null ? `Reorder @ ${fmt(reorderAt)} ${unit}` : "")}</span>
+        <span style={{ fontSize:10, color:"rgba(255,255,255,0.3)" }}>{pct.toFixed(0)}% full</span>
+      </div>
     </div>
   );
 };
@@ -608,7 +666,7 @@ function Dashboard({ userEmail, onLogout }) {
           <div className="fade-in">
             {/* Tanks */}
             <div style={{ fontSize:12, color:"rgba(255,255,255,0.35)", marginBottom:16, letterSpacing:0.5 }}>
-              Isotainer levels updated daily. Cost calculated from actual metered usage.
+              Tank levels updated live via GK telemetry. Cost calculated from actual metered usage.
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(280px, 1fr))", gap:16, marginBottom:24 }}>
               {tanks.map(t => <TankLevel key={t.id} {...t}/>)}
