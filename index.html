@@ -312,6 +312,28 @@ const genORP = () => +(180 + Math.random()*80 - Math.random()*15).toFixed(1);
 const genPH  = () => +(6.7 + Math.random()*0.8).toFixed(2);
 const genTDS = () => +(112000 + Math.random()*6000 - Math.random()*3000).toFixed(0);
 const genRate = () => +(55 + Math.random()*15).toFixed(1);
+// Inlet/Outlet pair generators — outlet reflects treatment effect (slight pH/ORP shift)
+const genInletORP  = () => +(170 + Math.random()*70 - Math.random()*20).toFixed(1);
+const genOutletORP = () => +(210 + Math.random()*60 - Math.random()*10).toFixed(1);
+const genInletPH   = () => +(6.5 + Math.random()*0.7).toFixed(2);
+const genOutletPH  = () => +(6.8 + Math.random()*0.5).toFixed(2);
+// Static water chemistry — single reading sufficient (slow-changing context)
+const genStatic = () => ({
+  chlorides: +(58000 + Math.random()*2000).toFixed(0),    // mg/L
+  conductivity: +(165000 + Math.random()*3000).toFixed(0), // μS/cm
+  temperature: +(72 + Math.random()*3).toFixed(1),         // °F
+  do: +(0.8 + Math.random()*0.4).toFixed(2),               // mg/L dissolved oxygen
+  cr: +(2.1 + Math.random()*0.6).toFixed(2),               // mpy corrosion rate
+  sg: +(1.082 + Math.random()*0.004).toFixed(3),           // specific gravity
+  lsi: +(0.3 + Math.random()*0.4 - 0.2).toFixed(2),        // Langelier scaling index
+  stiffDavis: +(0.5 + Math.random()*0.3 - 0.15).toFixed(2),// Stiff & Davis stability
+});
+// Chemical pump dose rates (placeholder — pending GK pump dashboard field discovery)
+const genDose = () => ({
+  tq20:  +(0.45 + Math.random()*0.08).toFixed(2),  // gal/min
+  si211: +(0.18 + Math.random()*0.04).toFixed(2),  // gal/min
+  h2o2:  0,                                          // standby — Job 1 fresh water
+});
 
 /* Initial tank state — capacities are physical, current values are
    placeholders until live telemetry is wired. Reorder fires at 14,000 gal
@@ -540,8 +562,18 @@ const TankLevel = ({ product, capacity, current, unit, rate, color, reorderAt, c
    ═══════════════════════════════════════════════ */
 function Dashboard({ userEmail, onLogout }) {
   const [data, setData] = useState({
-    orp: genORP(), ph: genPH(), tds: +genTDS(), flowRate: genRate(), h2o2Active: false,
-    orpHistory: Array.from({length:40}, (_,i) => ({t:i, v:genORP()})),
+    // Control loop pairs (Inlet drives decisions, Outlet proves treatment)
+    inletORP: genInletORP(), outletORP: genOutletORP(),
+    inletPH: genInletPH(),   outletPH: genOutletPH(),
+    flowRate: genRate(),
+    tds: +genTDS(),
+    // Static water chemistry
+    statics: genStatic(),
+    // Chemical dosing
+    dose: genDose(),
+    h2o2Active: false,
+    // Trend history — outlet ORP shows treatment effectiveness
+    orpHistory: Array.from({length:40}, (_,i) => ({t:i, v:genOutletORP()})),
   });
   const [tanks, setTanks] = useState(INITIAL_TANKS);
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -552,11 +584,18 @@ function Dashboard({ userEmail, onLogout }) {
   useEffect(() => {
     const iv = setInterval(() => {
       setData(prev => {
-        const newORP = genORP();
+        const newInletORP = genInletORP();
+        const newOutletORP = genOutletORP();
         return {
-          orp: newORP, ph: genPH(), tds: +genTDS(), flowRate: genRate(),
-          h2o2Active: newORP < 190,
-          orpHistory: [...prev.orpHistory.slice(-39), {t:prev.orpHistory.length, v:newORP}],
+          inletORP: newInletORP, outletORP: newOutletORP,
+          inletPH: genInletPH(),  outletPH: genOutletPH(),
+          flowRate: genRate(),
+          tds: +genTDS(),
+          statics: genStatic(),
+          dose: genDose(),
+          // H2O2 logic: triggers when INLET ORP drops below 0 (negative) — Job 1 fresh water = never
+          h2o2Active: newInletORP < 0,
+          orpHistory: [...prev.orpHistory.slice(-39), {t:prev.orpHistory.length, v:newOutletORP}],
         };
       });
       setTime(new Date());
@@ -648,7 +687,38 @@ function Dashboard({ userEmail, onLogout }) {
       <main style={{ maxWidth:1400, margin:"0 auto", padding:"20px 32px 60px", position:"relative", zIndex:10 }}>
 
         {/* ═══════ DASHBOARD ═══════ */}
-        {activeTab==="dashboard" && (
+        {activeTab==="dashboard" && (() => {
+          // Section header style helper
+          const sectionHeader = (label, subtitle, accent) => (
+            <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:12, paddingBottom:8, borderBottom:`1px solid ${accent}33` }}>
+              <div style={{ display:"flex", alignItems:"baseline", gap:10 }}>
+                <div style={{ width:3, height:14, background:accent, borderRadius:2, alignSelf:"center" }}/>
+                <span style={{ fontSize:11, fontWeight:700, color:accent, letterSpacing:2, textTransform:"uppercase" }}>{label}</span>
+                <span style={{ fontSize:11, color:"rgba(255,255,255,0.35)" }}>{subtitle}</span>
+              </div>
+            </div>
+          );
+          // Render a value cell with optional unit
+          const cell = (val, unit, color="#e2e8f0") => (
+            <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:18, fontWeight:600, color, whiteSpace:"nowrap" }}>
+              {val}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:4, fontWeight:400 }}>{unit}</span>
+            </div>
+          );
+          // Delta with directional color (green = treatment improving ORP)
+          const deltaORP = +(data.outletORP - data.inletORP).toFixed(1);
+          const deltaPH  = +(data.outletPH  - data.inletPH ).toFixed(2);
+          const deltaColor = deltaORP > 0 ? "#22c55e" : deltaORP < -5 ? "#ef4444" : "#94a3b8";
+          const phDeltaColor = Math.abs(deltaPH) < 0.3 ? "#22c55e" : "#f59e0b";
+          // Override stub button
+          const overrideBtn = (label) => (
+            <button disabled title="Manual override available in Phase 2" style={{
+              fontSize:10, fontWeight:600, padding:"4px 10px", borderRadius:6,
+              background:"rgba(255,255,255,0.03)", border:"1px dashed rgba(255,255,255,0.15)",
+              color:"rgba(255,255,255,0.3)", cursor:"not-allowed", fontFamily:"'DM Sans',sans-serif",
+              letterSpacing:0.5, textTransform:"uppercase",
+            }}>{label}</button>
+          );
+          return (
           <div className="fade-in">
             {/* H2O2 Banner */}
             <div style={{
@@ -665,42 +735,160 @@ function Dashboard({ userEmail, onLogout }) {
                   animation: data.h2o2Active ? "pulse 1.5s ease-in-out infinite" : "none",
                 }}/>
                 <span style={{ fontSize:13, fontWeight:600, color: data.h2o2Active ? "#fbbf24" : "#22c55e" }}>
-                  {data.h2o2Active ? "H₂O₂ PUMP ACTIVE — Demand injection in progress" : "H₂O₂ PUMP STANDBY — ORP positive, no injection required"}
+                  {data.h2o2Active ? "H₂O₂ PUMP ACTIVE — Demand injection in progress" : "H₂O₂ PUMP STANDBY — Not in use, Job 1 is fresh water"}
                 </span>
               </div>
-              <span style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>Peroxide pumps only when negative ORP is detected</span>
+              <span style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>H₂O₂ only deploys when inlet ORP turns negative</span>
             </div>
 
-            {/* Gauges */}
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:16, marginBottom:20 }}>
-              <SensorGauge label="ORP" value={data.orp} unit="mV" min={-250} max={400} icon="zap" thresholds={{critical:0,warn:150}} precision={1}/>
-              <SensorGauge label="pH" value={data.ph} unit="" min={0} max={14} icon="droplet" precision={2}/>
-              <SensorGauge label="TDS" value={data.tds} unit="mg/L" min={0} max={200000} icon="gauge" precision={0}/>
-              <SensorGauge label="Flow Rate" value={data.flowRate} unit="bbl/min" min={0} max={100} icon="activity" precision={1}/>
+            {/* ═══ GROUP 1: CONTROL LOOP ═══ */}
+            <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(34,211,238,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
+              {sectionHeader("Control Loop", "Inputs drive treatment · Outputs prove it worked", "#22d3ee")}
+              {/* Inlet vs Outlet table */}
+              <div style={{ display:"grid", gridTemplateColumns:"1.4fr 1fr 1fr 1fr", gap:0, alignItems:"center", marginBottom:14 }}>
+                {/* Header row */}
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", letterSpacing:1, textTransform:"uppercase", paddingBottom:8, borderBottom:"1px solid rgba(255,255,255,0.06)" }}>Parameter</div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", letterSpacing:1, textTransform:"uppercase", paddingBottom:8, borderBottom:"1px solid rgba(255,255,255,0.06)", textAlign:"center" }}>Inlet <span style={{color:"#94a3b8",fontWeight:400,textTransform:"none",letterSpacing:0}}>(driver)</span></div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", letterSpacing:1, textTransform:"uppercase", paddingBottom:8, borderBottom:"1px solid rgba(255,255,255,0.06)", textAlign:"center" }}>Outlet <span style={{color:"#94a3b8",fontWeight:400,textTransform:"none",letterSpacing:0}}>(result)</span></div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", letterSpacing:1, textTransform:"uppercase", paddingBottom:8, borderBottom:"1px solid rgba(255,255,255,0.06)", textAlign:"center" }}>Δ Treatment Effect</div>
+
+                {/* ORP row */}
+                <div style={{ padding:"14px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{color:"#fbbf24"}}><Icon type="zap" size={14}/></span>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:600, color:"#e2e8f0" }}>ORP</div>
+                    <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)" }}>Oxidation-reduction potential</div>
+                  </div>
+                </div>
+                <div style={{ padding:"14px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", textAlign:"center" }}>{cell(data.inletORP.toFixed(1), "mV")}</div>
+                <div style={{ padding:"14px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", textAlign:"center" }}>{cell(data.outletORP.toFixed(1), "mV", "#22d3ee")}</div>
+                <div style={{ padding:"14px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", textAlign:"center" }}>{cell((deltaORP > 0 ? "+" : "") + deltaORP, "mV", deltaColor)}</div>
+
+                {/* pH row */}
+                <div style={{ padding:"14px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{color:"#22d3ee"}}><Icon type="droplet" size={14}/></span>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:600, color:"#e2e8f0" }}>pH</div>
+                    <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)" }}>Drives scale inhibitor</div>
+                  </div>
+                </div>
+                <div style={{ padding:"14px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", textAlign:"center" }}>{cell(data.inletPH.toFixed(2), "")}</div>
+                <div style={{ padding:"14px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", textAlign:"center" }}>{cell(data.outletPH.toFixed(2), "", "#22d3ee")}</div>
+                <div style={{ padding:"14px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", textAlign:"center" }}>{cell((deltaPH > 0 ? "+" : "") + deltaPH.toFixed(2), "", phDeltaColor)}</div>
+
+                {/* Flow Rate row (inlet-only) */}
+                <div style={{ padding:"14px 0", display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{color:"#a78bfa"}}><Icon type="activity" size={14}/></span>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:600, color:"#e2e8f0" }}>Flow Rate</div>
+                    <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)" }}>Drives TQ-20 dose (target 200 ppm)</div>
+                  </div>
+                </div>
+                <div style={{ padding:"14px 0", textAlign:"center" }}>{cell(data.flowRate.toFixed(1), "bbl/min")}</div>
+                <div style={{ padding:"14px 0", textAlign:"center", color:"rgba(255,255,255,0.25)", fontSize:11 }}>—</div>
+                <div style={{ padding:"14px 0", textAlign:"center", color:"rgba(255,255,255,0.25)", fontSize:11 }}>—</div>
+              </div>
+
+              {/* Outlet ORP Trend */}
+              <div style={{ marginTop:8, paddingTop:14, borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                  <span style={{ fontSize:11, color:"rgba(255,255,255,0.45)", letterSpacing:1, textTransform:"uppercase", fontWeight:600 }}>Outlet ORP Trend — Last 40 readings</span>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <div style={{ width:6, height:6, borderRadius:"50%", background:"#22d3ee", animation:"pulse 2s infinite" }}/>
+                    <span style={{ fontSize:10, color:"rgba(255,255,255,0.3)" }}>Live · 3s</span>
+                  </div>
+                </div>
+                <Sparkline data={data.orpHistory} color="#22d3ee" height={70}/>
+              </div>
             </div>
 
-            {/* ORP Trend */}
-            <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(255,255,255,0.06)", borderRadius:12, padding:"20px 24px", backdropFilter:"blur(10px)" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-                <div style={{ fontSize:12, fontWeight:600, color:"rgba(255,255,255,0.5)", letterSpacing:1.5, textTransform:"uppercase" }}>ORP Trend — Last 40 Readings</div>
-                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                  <div style={{ width:6, height:6, borderRadius:"50%", background:"#22d3ee", animation:"pulse 2s infinite" }}/>
-                  <span style={{ fontSize:11, color:"rgba(255,255,255,0.25)" }}>Live — updates every 3s</span>
+            {/* ═══ GROUP 2: WATER CHEMISTRY ═══ */}
+            <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(167,139,250,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
+              {sectionHeader("Water Chemistry", "Static water profile · single reading sufficient", "#a78bfa")}
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:18 }}>
+                {[
+                  ["TDS",            data.tds.toLocaleString(),                "mg/L"],
+                  ["Chlorides",      data.statics.chlorides.toLocaleString(),  "mg/L"],
+                  ["Conductivity",   data.statics.conductivity.toLocaleString(), "μS/cm"],
+                  ["Temperature",    data.statics.temperature.toFixed(1),      "°F"],
+                  ["Dissolved O₂",   data.statics.do.toFixed(2),               "mg/L"],
+                  ["Corrosion Rate", data.statics.cr.toFixed(2),               "mpy"],
+                  ["Specific Gravity", data.statics.sg.toFixed(3),             ""],
+                  ["LSI",            (data.statics.lsi > 0 ? "+" : "") + data.statics.lsi.toFixed(2), ""],
+                  ["Stiff & Davis",  (data.statics.stiffDavis > 0 ? "+" : "") + data.statics.stiffDavis.toFixed(2), ""],
+                ].map(([label, val, unit]) => (
+                  <div key={label}>
+                    <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", letterSpacing:0.8, textTransform:"uppercase", marginBottom:4 }}>{label}</div>
+                    <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:18, fontWeight:600, color:"#e2e8f0" }}>
+                      {val}<span style={{ fontSize:10, color:"rgba(255,255,255,0.4)", marginLeft:4, fontWeight:400 }}>{unit}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ═══ GROUP 3: CHEMICAL DOSING ═══ */}
+            <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(34,197,94,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
+              {sectionHeader("Chemical Dosing", "Live pump injection rates", "#22c55e")}
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:16 }}>
+                {/* TQ-20 */}
+                <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(34,197,94,0.15)" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:700, color:"#22c55e", letterSpacing:0.5 }}>TQ-20</div>
+                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)" }}>Biocide · target 200 ppm</div>
+                    </div>
+                    {overrideBtn("Override")}
+                  </div>
+                  <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:24, fontWeight:600, color:"#e2e8f0" }}>
+                    {data.dose.tq20.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>gal/min</span>
+                  </div>
+                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>Pending GK pump field discovery</div>
+                </div>
+                {/* SI-211 */}
+                <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(34,197,94,0.15)" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:700, color:"#22c55e", letterSpacing:0.5 }}>SI-211</div>
+                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)" }}>Scale inhibitor</div>
+                    </div>
+                    {overrideBtn("Override")}
+                  </div>
+                  <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:24, fontWeight:600, color:"#e2e8f0" }}>
+                    {data.dose.si211.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>gal/min</span>
+                  </div>
+                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>Pending GK pump field discovery</div>
+                </div>
+                {/* H2O2 */}
+                <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px dashed rgba(255,255,255,0.1)", opacity:0.7 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:700, color:"#fbbf24", letterSpacing:0.5 }}>H₂O₂</div>
+                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)" }}>On-demand · ORP-triggered</div>
+                    </div>
+                    {overrideBtn("Override")}
+                  </div>
+                  <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:24, fontWeight:600, color:"rgba(255,255,255,0.4)" }}>
+                    STANDBY
+                  </div>
+                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>Not in use — Job 1 fresh water</div>
                 </div>
               </div>
-              <Sparkline data={data.orpHistory} color="#22d3ee" height={90}/>
-              <div style={{ display:"flex", justifyContent:"space-between", marginTop:8, fontSize:10, color:"rgba(255,255,255,0.25)", flexWrap:"wrap", gap:8 }}>
-                <span>Older</span>
-                <div style={{ display:"flex", gap:16 }}>
-                  <span style={{color:"#22c55e"}}>● Good (&gt;150 mV)</span>
-                  <span style={{color:"#f59e0b"}}>● Warning (0–150 mV)</span>
-                  <span style={{color:"#ef4444"}}>● Critical (&lt;0 mV → H₂O₂ activates)</span>
-                </div>
-                <span>Now</span>
+            </div>
+
+            {/* ═══ OVERRIDE NOTE ═══ */}
+            <div style={{ padding:"12px 18px", borderRadius:10, background:"rgba(255,255,255,0.02)", border:"1px dashed rgba(255,255,255,0.08)", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ color:"rgba(255,255,255,0.3)" }}><Icon type="shield" size={14}/></span>
+                <span style={{ fontSize:12, color:"rgba(255,255,255,0.55)" }}>
+                  <strong style={{color:"rgba(255,255,255,0.7)"}}>Phase 1 — Observation only.</strong> Closed-loop control runs on the GK ELECTRA computer. Manual override hooks ship in Phase 2.
+                </span>
               </div>
+              <span style={{ fontSize:10, color:"rgba(255,255,255,0.3)", letterSpacing:0.5, textTransform:"uppercase" }}>Phase 2 · post go-live</span>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* ═══════ INVENTORY & COST ═══════ */}
         {activeTab==="inventory" && (
