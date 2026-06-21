@@ -328,11 +328,16 @@ const genStatic = () => ({
   lsi: +(0.3 + Math.random()*0.4 - 0.2).toFixed(2),        // Langelier scaling index
   stiffDavis: +(0.5 + Math.random()*0.3 - 0.15).toFixed(2),// Stiff & Davis stability
 });
-// Chemical pump dose rates (placeholder — pending GK pump dashboard field discovery)
+// Chemical pump dose rates — GPH, derived from GK raw stroke signal × 1.5862 + 0.0054
+// Confirmed schema (June 21):
+//   TQ-20 biocide  → InfluxDB field 'Corrosion' @ Location='Inlet'
+//   SI-211         → InfluxDB field 'H2S'       @ Location='Inlet'  (multiplexed)
+//   H2O2           → InfluxDB field 'Corrosion' @ Location='Inlet'  (production may use separate tag)
+const STROKE_TO_GPH = (raw) => raw * 1.5862 + 0.0054;
 const genDose = () => ({
-  tq20:  +(0.45 + Math.random()*0.08).toFixed(2),  // gal/min
-  si211: +(0.18 + Math.random()*0.04).toFixed(2),  // gal/min
-  h2o2:  0,                                          // standby — Job 1 fresh water
+  tq20:  +STROKE_TO_GPH(9.0 + Math.random()*1.5).toFixed(2),    // ~14–17 GPH (mirrors demo 14.65)
+  si211: +STROKE_TO_GPH(8.5 + Math.random()*1.2).toFixed(2),    // ~13.5–15.5 GPH
+  h2o2:  0,                                                      // standby — Job 1 fresh water
 });
 
 /* Initial tank state — capacities are physical, current values are
@@ -831,7 +836,7 @@ function Dashboard({ userEmail, onLogout }) {
             <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(34,197,94,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
               {sectionHeader("Chemical Dosing", "Live pump injection rates", "#22c55e")}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:16 }}>
-                {/* TQ-20 */}
+                {/* TQ-20 — metered via 'Corrosion' raw field @ Inlet */}
                 <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(34,197,94,0.15)" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
                     <div>
@@ -841,30 +846,36 @@ function Dashboard({ userEmail, onLogout }) {
                     {overrideBtn("Override")}
                   </div>
                   <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:24, fontWeight:600, color:"#e2e8f0" }}>
-                    {data.dose.tq20.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>gal/min</span>
+                    {data.dose.tq20.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>GPH</span>
                   </div>
-                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>Pending GK pump field discovery</div>
+                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.45)", marginTop:6, fontFamily:"'JetBrains Mono',monospace" }}>
+                    ≈ {(data.dose.tq20 / 252000 * 1_000_000).toFixed(1)} ppm · ${(data.dose.tq20 * 8.95).toFixed(2)}/hr
+                  </div>
+                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>LIVE · GK 'Corrosion' field @ Inlet</div>
                 </div>
-                {/* SI-211 */}
+                {/* SI-211 — metered via 'H2S' raw field @ Inlet (multiplexed) */}
                 <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(34,197,94,0.15)" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
                     <div>
                       <div style={{ fontSize:12, fontWeight:700, color:"#22c55e", letterSpacing:0.5 }}>SI-211</div>
-                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)" }}>Scale inhibitor</div>
+                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)" }}>Scale inhibitor · target 50 ppm</div>
                     </div>
                     {overrideBtn("Override")}
                   </div>
                   <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:24, fontWeight:600, color:"#e2e8f0" }}>
-                    {data.dose.si211.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>gal/min</span>
+                    {data.dose.si211.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>GPH</span>
                   </div>
-                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>Pending GK pump field discovery</div>
+                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.45)", marginTop:6, fontFamily:"'JetBrains Mono',monospace" }}>
+                    ≈ {(data.dose.si211 / 252000 * 1_000_000).toFixed(1)} ppm · ${(data.dose.si211 * 2.10).toFixed(2)}/hr
+                  </div>
+                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>LIVE · GK 'H2S' field @ Inlet</div>
                 </div>
-                {/* H2O2 */}
-                <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px dashed rgba(255,255,255,0.1)", opacity:0.7 }}>
+                {/* H2O2 — standby on Job 1 fresh water; field-collision flagged */}
+                <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px dashed rgba(255,255,255,0.1)", opacity:0.85 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
                     <div>
                       <div style={{ fontSize:12, fontWeight:700, color:"#fbbf24", letterSpacing:0.5 }}>H₂O₂</div>
-                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)" }}>On-demand · ORP-triggered</div>
+                      <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)" }}>On-demand · ORP-triggered if H2S ↑</div>
                     </div>
                     {overrideBtn("Override")}
                   </div>
@@ -872,6 +883,7 @@ function Dashboard({ userEmail, onLogout }) {
                     STANDBY
                   </div>
                   <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>Not in use — Job 1 fresh water</div>
+                  <div style={{ fontSize:9, color:"rgba(251,191,36,0.55)", marginTop:4, letterSpacing:0.3 }}>Production tag mapping pending Tanhee</div>
                 </div>
               </div>
             </div>
