@@ -156,6 +156,12 @@ async function loadReport() {
 }
 
 function renderError(msg) {
+  // Hide the toolbar (Back / Download PDF) on error states so the only
+  // visible action is implicit — the page itself is unhelpful for printing.
+  const toolbar = document.querySelector(".toolbar");
+  if (toolbar) {
+    toolbar.innerHTML = '<button class="secondary" onclick="window.history.length > 1 ? window.history.back() : window.close()">Back</button>';
+  }
   document.getElementById("root").innerHTML = `<div class="error">${esc(msg)}</div>`;
 }
 
@@ -171,7 +177,7 @@ function render(r) {
   let html = `
     <div class="letterhead">
       <div class="brand">
-        <div class="logo-mark">SCT</div>
+        <div class="logo-mark">S</div>
         <div class="brand-text">
           <div class="name">SUPREME CHEMICAL TECHNOLOGY</div>
           <div class="tag">Production · Completion · Specialty Treatments</div>

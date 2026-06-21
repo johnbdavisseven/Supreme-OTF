@@ -59,6 +59,36 @@
   .empty-state { text-align:center; padding:40px 20px; color:rgba(255,255,255,0.4); font-size:13px; }
   .product-row { display:grid; grid-template-columns:120px repeat(5, 1fr) auto; gap:8px; align-items:end; margin-bottom:8px; }
   .product-row .prod-label { font-weight:600; font-size:12px; padding-bottom:10px; }
+
+  /* Toast (Save / Publish success/error feedback) — pinned top-right so it's never below the fold */
+  .toast {
+    position: fixed; top: 20px; right: 20px; z-index: 100;
+    padding: 12px 18px; font-size: 13px; font-weight: 500;
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    opacity: 0; transform: translateX(20px); pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    max-width: 360px;
+  }
+  .toast.visible { opacity: 1; transform: translateX(0); }
+  .toast.success { background: rgba(16,185,129,0.18); border: 1px solid rgba(16,185,129,0.5); color: #6ee7b7; }
+  .toast.error   { background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.5); color: #fca5a5; }
+
+  /* Branded modal (replaces window.confirm) */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(7,11,20,0.7); backdrop-filter: blur(4px);
+    z-index: 200; display: none; align-items: center; justify-content: center;
+  }
+  .modal-backdrop.visible { display: flex; }
+  .modal {
+    background: #0c1425; border: 1px solid rgba(34,211,238,0.2); border-radius: 12px;
+    padding: 24px 28px; max-width: 440px; width: calc(100% - 40px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  .modal h4 { font-size: 15px; font-weight: 600; margin-bottom: 8px; color: #e2e8f0; }
+  .modal p  { font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.55; margin-bottom: 20px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .modal.danger { border-color: rgba(239,68,68,0.3); }
+  .modal.danger h4 { color: #fca5a5; }
 </style>
 </head>
 <body>
@@ -259,9 +289,23 @@
         </div>
       </div>
 
-      <div id="builder-status" style="margin-top:8px; padding:8px 12px; font-size:12px; display:none;"></div>
     </div>
 
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast" class="toast"></div>
+
+<!-- Branded confirmation modal -->
+<div id="modal-backdrop" class="modal-backdrop">
+  <div id="modal" class="modal">
+    <h4 id="modal-title">Confirm</h4>
+    <p id="modal-body">Are you sure?</p>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="modal-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-ok">Confirm</button>
+    </div>
   </div>
 </div>
 
@@ -353,10 +397,16 @@ async function loadList() {
       $("reports-list").innerHTML = '<div class="empty-state">No reports yet. Click + New Daily or + New End-of-Job to create one.</div>';
       return;
     }
+    const fmtShort = (d) => { if (!d) return null; try { return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month:"short", day:"numeric" }); } catch { return d; } };
     const rows = reports.map(r => {
       const typePill = r.report_type === "daily" ? '<span class="pill pill-daily">Daily</span>' : '<span class="pill pill-eoj">End of Job</span>';
       const statusPill = r.status === "published" ? '<span class="pill pill-published">Published</span>' : '<span class="pill pill-draft">Draft</span>';
-      const date = r.report_date || r.period_end || (r.created_at ? r.created_at.slice(0,10) : "—");
+      let date;
+      if (r.report_type === "eoj" && r.period_start && r.period_end) {
+        date = `${fmtShort(r.period_start)} – ${fmtShort(r.period_end)}`;
+      } else {
+        date = r.report_date || r.period_end || (r.created_at ? r.created_at.slice(0,10) : "—");
+      }
       return `
         <tr>
           <td>${typePill}</td>
@@ -388,9 +438,15 @@ async function loadList() {
 }
 
 async function deleteReport(id) {
-  if (!confirm("Delete this report? This cannot be undone.")) return;
-  try { await callAdmin({ action: "delete", id }); loadList(); }
-  catch (e) { alert("Delete failed: " + e.message); }
+  const ok = await confirmDialog({
+    title: "Delete this report?",
+    body: "The report row and any associated data will be permanently removed. This cannot be undone.",
+    okLabel: "Delete",
+    danger: true,
+  });
+  if (!ok) return;
+  try { await callAdmin({ action: "delete", id }); showStatus("Report deleted."); loadList(); }
+  catch (e) { showStatus("Delete failed: " + e.message, "error"); }
 }
 
 // ---------- Builder ----------
@@ -490,8 +546,8 @@ function setType(type) {
 function openBuilder(id, type) {
   $("list-view").style.display = "none";
   $("builder-view").style.display = "block";
-  // Clear status
-  $("builder-status").style.display = "none";
+  // Clear any lingering toast
+  $("toast").classList.remove("visible");
 
   if (id) {
     // Load existing
@@ -505,7 +561,7 @@ function openBuilder(id, type) {
       $("builder-status-pill").textContent = report.status === "published" ? "PUBLISHED" : "DRAFT";
       $("builder-preview").disabled = false;
       $("builder-publish").disabled = false;
-    }).catch(e => { alert("Failed to load: " + e.message); $("builder-back").click(); });
+    }).catch(e => { showStatus("Failed to load report: " + e.message, "error"); $("builder-back").click(); });
   } else {
     currentReport = null;
     setType(type);
@@ -515,11 +571,14 @@ function openBuilder(id, type) {
     $("builder-status-pill").textContent = "DRAFT";
     $("builder-preview").disabled = true;
     $("builder-publish").disabled = true;
-    // Default today's date
+    // Default dates: today for daily; today + 7 days ago for EOJ start
     if (type === "daily") {
       $("f-report-date").valueAsDate = new Date();
     } else {
-      $("f-period-end").valueAsDate = new Date();
+      const today = new Date();
+      const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+      $("f-period-start").valueAsDate = weekAgo;
+      $("f-period-end").valueAsDate = today;
     }
   }
 }
@@ -668,16 +727,57 @@ function collectPayload() {
   }
 }
 
+// Pinned top-right toast — always visible, never below the fold.
+let _toastTimer = null;
 function showStatus(msg, kind) {
-  const el = $("builder-status");
-  el.style.display = "block";
+  const el = $("toast");
   el.textContent = msg;
-  if (kind === "error") {
-    el.style.background = "rgba(239,68,68,0.1)"; el.style.border = "1px solid rgba(239,68,68,0.3)"; el.style.color = "#ef4444"; el.style.borderRadius = "6px";
-  } else {
-    el.style.background = "rgba(16,185,129,0.1)"; el.style.border = "1px solid rgba(16,185,129,0.3)"; el.style.color = "#10b981"; el.style.borderRadius = "6px";
-  }
-  setTimeout(() => { el.style.display = "none"; }, 4000);
+  el.className = "toast visible " + (kind === "error" ? "error" : "success");
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.classList.remove("visible"); }, 6000);
+}
+
+// Branded confirmation modal that returns a Promise<boolean>.
+// Replaces window.confirm so the UI stays on-brand and the flow stays
+// automation-friendly (no native dialog blocking the renderer).
+function confirmDialog({ title, body, okLabel = "Confirm", cancelLabel = "Cancel", danger = false } = {}) {
+  return new Promise((resolve) => {
+    const backdrop = $("modal-backdrop");
+    const modal = $("modal");
+    $("modal-title").textContent = title || "Confirm";
+    $("modal-body").textContent = body || "Are you sure?";
+    const okBtn = $("modal-ok");
+    const cancelBtn = $("modal-cancel");
+    okBtn.textContent = okLabel;
+    cancelBtn.textContent = cancelLabel;
+    modal.className = "modal" + (danger ? " danger" : "");
+    okBtn.className = danger ? "btn-danger" : "btn-primary";
+    if (danger) okBtn.style.padding = "10px 20px";
+    else okBtn.style.padding = "";
+
+    function cleanup(result) {
+      backdrop.classList.remove("visible");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      backdrop.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    }
+    function onOk() { cleanup(true); }
+    function onCancel() { cleanup(false); }
+    function onBackdrop(e) { if (e.target === backdrop) cleanup(false); }
+    function onKey(e) {
+      if (e.key === "Escape") cleanup(false);
+      else if (e.key === "Enter") cleanup(true);
+    }
+
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    backdrop.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey);
+    backdrop.classList.add("visible");
+    setTimeout(() => okBtn.focus(), 50);
+  });
 }
 
 $("builder-save").addEventListener("click", async () => {
@@ -709,7 +809,15 @@ $("builder-preview").addEventListener("click", () => {
 
 $("builder-publish").addEventListener("click", async () => {
   if (!currentReport) return;
-  if (!confirm("Publish this report? Customers with 'visible' checked will see it in their Documents tab.")) return;
+  const visible = $("f-visible").checked;
+  const ok = await confirmDialog({
+    title: "Publish this report?",
+    body: visible
+      ? "The report will be marked Final and become visible to the customer in their Documents tab immediately."
+      : "The report will be marked Final but stay hidden from the customer until you check 'Visible to customer' and re-save.",
+    okLabel: "Publish",
+  });
+  if (!ok) return;
   $("builder-publish").disabled = true;
   try {
     // Save first to capture latest edits
