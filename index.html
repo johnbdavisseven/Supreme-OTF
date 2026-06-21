@@ -263,13 +263,12 @@ const AppWithAuth = () => {
    Each panel falls back to simulated data when USE_LIVE_DATA = false
    or when the API call fails, so the dashboard always renders.
    ═══════════════════════════════════════════════ */
-// Confirmed June 21, 2026 via GKOS Grafana Query Inspector
-// (gkoilfield.grafana.net/d/jopnxdw/tank-levels-double-eagle).
-// Schema: measurement = operator name; tags = Pad, Well, Tank (and likely Computer);
-// tank fields include "Fluid Volume" (gal), "Fluid Percentage" (%), "Pump Rate",
-// "Days Remaining", "Voltage". Sensor field names (ORP/pH/TDS/flow) still TBD
-// from a separate sensor dashboard — those panels will continue using simulated
-// data until discovered.
+// Confirmed June 21, 2026 via GKOS Grafana Query Inspector. Two dashboards:
+//   Tank dashboard   /d/jopnxdw  — tags Pad/Well/Tank, fields Fluid Volume/Fluid Percentage/Pump Rate
+//   Sensor dashboard /d/tasp46j  — tag Location (Inlet/Outlet), fields ORP/pH/H2S/Conductivity/TDS/Chlorides
+// Both use the operator name as the InfluxDB measurement.
+// Production data will live under measurement "Double Eagle" once Bankhead pad
+// starts July 3, 2026. Demo data is under "Double Eagle Demo".
 const USE_LIVE_DATA = false; // flip to true once service-account token is in place
 const API_BASE = "https://supreme-otf-api.vercel.app";
 const MEASUREMENT = "Double Eagle"; // InfluxDB measurement for production data
@@ -282,23 +281,28 @@ const TANK_TAGS = {
   h2o2:  { Pad: "Bankhead", Well: "Yard", Tank: "H2O2"   }, // placeholder — confirm with GK
 };
 
+// Sensor data is keyed by Location tag ('Inlet' / 'Outlet'), NOT by Pad/Well/Tank.
+// Tank data is keyed by Pad/Well/Tank, NOT by Location. Two different schemas
+// on the same measurement (the operator name).
 const FIELD_MAP = {
-  // Sensor fields (Live Dashboard tab) — STILL TBD, names below are guesses
-  orp:   { measurement: MEASUREMENT, field: "ORP"              , tags: null }, // TBD
-  ph:    { measurement: MEASUREMENT, field: "pH"               , tags: null }, // TBD
-  tds:   { measurement: MEASUREMENT, field: "TDS"              , tags: null }, // TBD
-  flow:  { measurement: MEASUREMENT, field: "Flow Rate"        , tags: null }, // TBD
-  // Tank telemetry (Inventory & Cost tab) — field names CONFIRMED, tag values pending
-  tq20:  { measurement: MEASUREMENT, field: "Fluid Volume"     , tags: TANK_TAGS.tq20  },
-  si211: { measurement: MEASUREMENT, field: "Fluid Volume"     , tags: TANK_TAGS.si211 },
-  h2o2:  { measurement: MEASUREMENT, field: "Fluid Volume"     , tags: TANK_TAGS.h2o2  },
-  // Auxiliary tank metrics (derived/displayed but not bound to TankLevel yet)
+  // ── Sensor fields (Live Dashboard tab) — CONFIRMED June 21, 2026 from /d/tasp46j ──
+  orp_inlet:    { measurement: MEASUREMENT, field: "ORP",          tags: { Location: "Inlet"  } },
+  orp_outlet:   { measurement: MEASUREMENT, field: "ORP",          tags: { Location: "Outlet" } },
+  ph_outlet:    { measurement: MEASUREMENT, field: "pH",           tags: { Location: "Outlet" } },
+  h2s_inlet:    { measurement: MEASUREMENT, field: "H2S",          tags: { Location: "Inlet"  } },
+  conductivity: { measurement: MEASUREMENT, field: "Conductivity", tags: null }, // unscoped (no Location filter on GKOS panel)
+  tds:          { measurement: MEASUREMENT, field: "TDS",          tags: null }, // unscoped
+  chlorides:    { measurement: MEASUREMENT, field: "Chlorides",    tags: null }, // unscoped
+  // ── Tank telemetry (Inventory & Cost tab) — field names CONFIRMED, tag values still pending ──
+  tq20:       { measurement: MEASUREMENT, field: "Fluid Volume",     tags: TANK_TAGS.tq20  },
+  si211:      { measurement: MEASUREMENT, field: "Fluid Volume",     tags: TANK_TAGS.si211 },
+  h2o2:       { measurement: MEASUREMENT, field: "Fluid Volume",     tags: TANK_TAGS.h2o2  },
   tq20_pct:   { measurement: MEASUREMENT, field: "Fluid Percentage", tags: TANK_TAGS.tq20  },
   si211_pct:  { measurement: MEASUREMENT, field: "Fluid Percentage", tags: TANK_TAGS.si211 },
   h2o2_pct:   { measurement: MEASUREMENT, field: "Fluid Percentage", tags: TANK_TAGS.h2o2  },
-  tq20_rate:  { measurement: MEASUREMENT, field: "Pump Rate"      , tags: TANK_TAGS.tq20  },
-  si211_rate: { measurement: MEASUREMENT, field: "Pump Rate"      , tags: TANK_TAGS.si211 },
-  h2o2_rate:  { measurement: MEASUREMENT, field: "Pump Rate"      , tags: TANK_TAGS.h2o2  },
+  tq20_rate:  { measurement: MEASUREMENT, field: "Pump Rate",        tags: TANK_TAGS.tq20  },
+  si211_rate: { measurement: MEASUREMENT, field: "Pump Rate",        tags: TANK_TAGS.si211 },
+  h2o2_rate:  { measurement: MEASUREMENT, field: "Pump Rate",        tags: TANK_TAGS.h2o2  },
 };
 
 /* ═══════════════════════════════════════════════
