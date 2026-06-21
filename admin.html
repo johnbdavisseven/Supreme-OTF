@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Supreme OTF · Admin</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%231B2A3D'/><text x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' fill='%238FAADC' font-family='Arial' font-weight='700' font-size='18'>S</text></svg>" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { background:#070b14; color:#e2e8f0; font-family:'DM Sans',sans-serif; -webkit-font-smoothing:antialiased; }
+  ::-webkit-scrollbar { width:6px; }
+  ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.1); border-radius:3px; }
+  input, select, textarea, button { font-family:inherit; font-size:13px; outline:none; }
+  input[type="text"], input[type="password"], input[type="date"], select, textarea {
+    width:100%; padding:10px 12px; background:#0c1425; border:1px solid rgba(255,255,255,0.08);
+    border-radius:6px; color:#e2e8f0;
+  }
+  input:focus, select:focus, textarea:focus { border-color:rgba(34,211,238,0.4); }
+  label { display:block; font-size:11px; font-weight:600; color:rgba(255,255,255,0.5);
+          letterSpacing:0.5px; text-transform:uppercase; margin-bottom:6px; }
+  button { cursor:pointer; transition:all 0.15s; }
+  .btn-primary { background:#22d3ee; color:#070b14; border:none; padding:10px 20px;
+                 border-radius:6px; font-weight:600; font-size:13px; }
+  .btn-primary:hover { background:#67e8f9; }
+  .btn-primary:disabled { opacity:0.4; cursor:not-allowed; }
+  .btn-secondary { background:transparent; color:rgba(255,255,255,0.6); border:1px solid rgba(255,255,255,0.1);
+                   padding:8px 14px; border-radius:6px; font-size:12px; font-weight:600; }
+  .btn-secondary:hover { background:rgba(255,255,255,0.05); color:#fff; border-color:rgba(255,255,255,0.2); }
+  .btn-danger { background:transparent; color:#ef4444; border:1px solid rgba(239,68,68,0.3);
+                padding:6px 12px; border-radius:6px; font-size:11px; font-weight:600; }
+  .btn-danger:hover { background:rgba(239,68,68,0.1); }
+  .pill { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px;
+          font-weight:700; letter-spacing:0.5px; text-transform:uppercase; }
+  .pill-sds    { background:rgba(239,68,68,0.15); color:#ef4444; }
+  .pill-field  { background:rgba(34,211,238,0.15); color:#22d3ee; }
+  .pill-lab    { background:rgba(167,139,250,0.15); color:#a78bfa; }
+  .pill-permit { background:rgba(245,158,11,0.15); color:#f59e0b; }
+  .pill-other  { background:rgba(100,116,139,0.15); color:#94a3b8; }
+  .pill-hidden { background:rgba(255,255,255,0.05); color:rgba(255,255,255,0.4); }
+</style>
+</head>
+<body>
+<div style="max-width:1100px; margin:0 auto; padding:24px 32px;">
+
+  <!-- Header -->
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;
+              padding-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.06);">
+    <div style="display:flex; align-items:center; gap:14px;">
+      <div style="width:36px; height:36px; background:#1B2A3D; border-radius:7px;
+                  display:flex; align-items:center; justify-content:center; color:#8FAADC;
+                  font-weight:700; font-size:18px;">S</div>
+      <div>
+        <div style="font-size:14px; font-weight:700; letter-spacing:1.2px;">SUPREME CHEMICAL TECHNOLOGY</div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.4); letter-spacing:1px;">ADMIN · DOCUMENT MANAGEMENT</div>
+      </div>
+    </div>
+    <a href="/" style="font-size:12px; color:rgba(255,255,255,0.5); text-decoration:none;">← back to portal</a>
+  </div>
+
+  <!-- Auth gate -->
+  <div id="auth-gate" style="max-width:380px; margin:80px auto; background:rgba(15,23,42,0.7);
+                              border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:32px;">
+    <div style="font-size:18px; font-weight:600; margin-bottom:6px;">Admin sign-in</div>
+    <div style="font-size:12px; color:rgba(255,255,255,0.4); margin-bottom:24px;">Enter your admin password to manage customer documents.</div>
+    <form id="auth-form">
+      <label>Password</label>
+      <input type="password" id="admin-password" autocomplete="current-password" required />
+      <div id="auth-error" style="display:none; margin-top:10px; padding:8px 12px;
+                                    background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3);
+                                    border-radius:6px; color:#ef4444; font-size:12px;"></div>
+      <button class="btn-primary" type="submit" style="width:100%; margin-top:16px;">Sign in</button>
+    </form>
+  </div>
+
+  <!-- Main admin UI (hidden until auth) -->
+  <div id="admin-ui" style="display:none;">
+
+    <!-- Customer selector + new upload toggle -->
+    <div style="display:flex; gap:16px; align-items:flex-end; margin-bottom:20px;">
+      <div style="flex:1; max-width:280px;">
+        <label>Customer</label>
+        <select id="customer-select">
+          <option value="DOUBLE_EAGLE">Double Eagle Energy</option>
+          <option value="AGERON">Ageron Energy</option>
+          <option value="BTA">BTA Oil Producers</option>
+          <option value="KFOC">Kaiser-Francis (KFOC)</option>
+          <option value="MACK">Mack Energy</option>
+          <option value="UPCURVE">Upcurve Energy</option>
+        </select>
+      </div>
+      <button class="btn-primary" id="toggle-upload-btn">+ New document</button>
+    </div>
+
+    <!-- Upload form (collapsed by default) -->
+    <div id="upload-form-container" style="display:none; background:rgba(15,23,42,0.7);
+                                            border:1px solid rgba(34,211,238,0.15); border-radius:12px;
+                                            padding:24px; margin-bottom:24px;">
+      <div style="font-size:14px; font-weight:600; margin-bottom:16px; color:#22d3ee;">Upload a new document</div>
+      <form id="upload-form">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          <div>
+            <label>Category *</label>
+            <select id="up-category" required>
+              <option value="SDS">SDS — Safety Data Sheet</option>
+              <option value="Field">Field Report</option>
+              <option value="Lab">Lab Report</option>
+              <option value="Permit">Permit</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label>Document date</label>
+            <input type="date" id="up-date" />
+          </div>
+        </div>
+
+        <div style="margin-top:14px;">
+          <label>Display name *</label>
+          <input type="text" id="up-name" required placeholder="e.g. Dauntless 22-11 West — OTF Field Report" />
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:14px;">
+          <div>
+            <label>Pad (optional)</label>
+            <input type="text" id="up-pad" placeholder="e.g. Bankhead" />
+          </div>
+          <div>
+            <label>Well (optional)</label>
+            <input type="text" id="up-well" placeholder="e.g. 22-11W" />
+          </div>
+        </div>
+
+        <div style="margin-top:14px;">
+          <label>Description (optional)</label>
+          <textarea id="up-description" rows="2" placeholder="Short note shown to customer"></textarea>
+        </div>
+
+        <div style="margin-top:14px;">
+          <label>File * (PDF, Word, Excel, image — max 100 MB)</label>
+          <input type="file" id="up-file" required accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,image/*"
+                 style="padding:10px 12px; background:#0c1425; border:1px solid rgba(255,255,255,0.08);
+                        border-radius:6px; color:#e2e8f0; width:100%;" />
+        </div>
+
+        <div id="upload-error" style="display:none; margin-top:14px; padding:10px 14px;
+                                       background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3);
+                                       border-radius:6px; color:#ef4444; font-size:12px;"></div>
+
+        <div style="display:flex; gap:10px; margin-top:20px;">
+          <button class="btn-primary" type="submit" id="upload-submit">Upload document</button>
+          <button class="btn-secondary" type="button" id="upload-cancel">Cancel</button>
+          <div id="upload-status" style="margin-left:auto; align-self:center; font-size:12px; color:rgba(255,255,255,0.5);"></div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Documents list -->
+    <div id="docs-container" style="background:rgba(15,23,42,0.7); border:1px solid rgba(255,255,255,0.06);
+                                     border-radius:12px; overflow:hidden;">
+      <div id="docs-loading" style="padding:40px; text-align:center; color:rgba(255,255,255,0.4); font-size:13px;">
+        Loading documents…
+      </div>
+    </div>
+
+    <div style="margin-top:24px; padding:14px 18px; border-radius:8px; background:rgba(255,255,255,0.02);
+                border:1px solid rgba(255,255,255,0.04); font-size:11px; color:rgba(255,255,255,0.4);">
+      <strong style="color:rgba(255,255,255,0.6);">How visibility works:</strong>
+      Documents marked <em>Visible</em> appear in the customer portal Documents tab.
+      Toggle <em>Hidden</em> to remove a doc from the customer view without deleting it.
+      Delete removes both the file and the row permanently.
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://bfpsvvojskrbzrhcuuwe.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJmcHN2dm9qc2tyYnpyaGN1dXdlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMDY0NDAsImV4cCI6MjA5Mjg4MjQ0MH0.5QHKJgVMkiby7iNd7sfoDHb6LsR3BMO-a8R3k2F7vIs";
+let ADMIN_PASSWORD = sessionStorage.getItem("sct_admin_pw") || "";
+
+// ── Auth ──
+const authGate = document.getElementById("auth-gate");
+const adminUI = document.getElementById("admin-ui");
+const authForm = document.getElementById("auth-form");
+const authError = document.getElementById("auth-error");
+
+async function callAdmin(body) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/docs-admin`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      "x-admin-password": ADMIN_PASSWORD,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function showAuthError(msg) {
+  authError.textContent = msg;
+  authError.style.display = "block";
+}
+
+authForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  authError.style.display = "none";
+  ADMIN_PASSWORD = document.getElementById("admin-password").value;
+  try {
+    // Try a list call to validate the password
+    await callAdmin({ action: "list", customer_code: "DOUBLE_EAGLE" });
+    sessionStorage.setItem("sct_admin_pw", ADMIN_PASSWORD);
+    authGate.style.display = "none";
+    adminUI.style.display = "block";
+    loadDocs();
+  } catch (err) {
+    showAuthError(err.message === "unauthorized" ? "Incorrect password." : err.message);
+    ADMIN_PASSWORD = "";
+    sessionStorage.removeItem("sct_admin_pw");
+  }
+});
+
+// Auto-sign-in if password is in session storage
+if (ADMIN_PASSWORD) {
+  callAdmin({ action: "list", customer_code: "DOUBLE_EAGLE" })
+    .then(() => { authGate.style.display = "none"; adminUI.style.display = "block"; loadDocs(); })
+    .catch(() => { ADMIN_PASSWORD = ""; sessionStorage.removeItem("sct_admin_pw"); });
+}
+
+// ── Document list ──
+const customerSelect = document.getElementById("customer-select");
+const docsContainer = document.getElementById("docs-container");
+
+customerSelect.addEventListener("change", loadDocs);
+
+function fmtBytes(b) {
+  if (b == null) return "—";
+  if (b < 1024) return `${b} B`;
+  if (b < 1024*1024) return `${(b/1024).toFixed(0)} KB`;
+  return `${(b/(1024*1024)).toFixed(1)} MB`;
+}
+function fmtDate(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`;
+}
+
+async function loadDocs() {
+  docsContainer.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4); font-size:13px;">Loading documents…</div>`;
+  try {
+    const data = await callAdmin({ action: "list", customer_code: customerSelect.value });
+    renderDocs(data.documents || []);
+  } catch (err) {
+    docsContainer.innerHTML = `<div style="padding:24px; color:#ef4444; font-size:13px;">Error: ${err.message}</div>`;
+  }
+}
+
+function renderDocs(docs) {
+  if (docs.length === 0) {
+    docsContainer.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4); font-size:13px;">No documents yet for this customer. Click <strong>+ New document</strong> to upload one.</div>`;
+    return;
+  }
+  docsContainer.innerHTML = docs.map((d, i) => {
+    const pillClass = `pill-${d.category.toLowerCase()}`;
+    const visible = d.visible_to_customer;
+    return `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px;
+                  border-bottom:${i < docs.length-1 ? '1px solid rgba(255,255,255,0.04)' : 'none'};">
+        <div style="display:flex; align-items:center; gap:14px; flex:1; min-width:0;">
+          <span class="pill ${pillClass}">${d.category}</span>
+          <div style="min-width:0; flex:1;">
+            <div style="font-size:13px; font-weight:500; color:rgba(255,255,255,0.85); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(d.name)}</div>
+            <div style="font-size:11px; color:rgba(255,255,255,0.35); margin-top:2px;">
+              ${fmtDate(d.doc_date || d.created_at)} · ${fmtBytes(d.size_bytes)}
+              ${d.pad ? `· ${escapeHtml(d.pad)}${d.well ? ' / ' + escapeHtml(d.well) : ''}` : ''}
+              ${!visible ? '<span class="pill pill-hidden" style="margin-left:8px;">HIDDEN</span>' : ''}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+          ${d.signed_url ? `<a class="btn-secondary" href="${d.signed_url}" target="_blank" rel="noopener">View</a>` : ''}
+          <button class="btn-secondary" data-toggle="${d.id}" data-visible="${!visible}">${visible ? 'Hide' : 'Show'}</button>
+          <button class="btn-danger"    data-delete="${d.id}">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Wire up actions
+  docsContainer.querySelectorAll("[data-toggle]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-toggle");
+      const visible = btn.getAttribute("data-visible") === "true";
+      btn.disabled = true;
+      try { await callAdmin({ action: "toggle", id, visible }); await loadDocs(); }
+      catch (err) { alert("Error: " + err.message); btn.disabled = false; }
+    });
+  });
+  docsContainer.querySelectorAll("[data-delete]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Permanently delete this document? This cannot be undone.")) return;
+      const id = btn.getAttribute("data-delete");
+      btn.disabled = true;
+      try { await callAdmin({ action: "delete", id }); await loadDocs(); }
+      catch (err) { alert("Error: " + err.message); btn.disabled = false; }
+    });
+  });
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]);
+}
+
+// ── Upload form ──
+const toggleUploadBtn = document.getElementById("toggle-upload-btn");
+const uploadContainer = document.getElementById("upload-form-container");
+const uploadForm = document.getElementById("upload-form");
+const uploadCancel = document.getElementById("upload-cancel");
+const uploadError = document.getElementById("upload-error");
+const uploadStatus = document.getElementById("upload-status");
+const uploadSubmit = document.getElementById("upload-submit");
+
+toggleUploadBtn.addEventListener("click", () => {
+  uploadContainer.style.display = uploadContainer.style.display === "none" ? "block" : "none";
+});
+uploadCancel.addEventListener("click", () => {
+  uploadContainer.style.display = "none";
+  uploadForm.reset();
+  uploadError.style.display = "none";
+  uploadStatus.textContent = "";
+});
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      const base64 = result.split(",")[1]; // strip "data:...;base64,"
+      resolve(base64);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+uploadForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  uploadError.style.display = "none";
+
+  const file = document.getElementById("up-file").files[0];
+  if (!file) { uploadError.textContent = "Pick a file."; uploadError.style.display = "block"; return; }
+  if (file.size > 100 * 1024 * 1024) {
+    uploadError.textContent = "File too large (max 100 MB).";
+    uploadError.style.display = "block"; return;
+  }
+
+  uploadSubmit.disabled = true;
+  uploadStatus.textContent = "Encoding…";
+  try {
+    const file_base64 = await fileToBase64(file);
+    uploadStatus.textContent = "Uploading…";
+    await callAdmin({
+      action: "upload",
+      customer_code: customerSelect.value,
+      category: document.getElementById("up-category").value,
+      name: document.getElementById("up-name").value.trim(),
+      doc_date: document.getElementById("up-date").value || null,
+      pad: document.getElementById("up-pad").value.trim() || null,
+      well: document.getElementById("up-well").value.trim() || null,
+      description: document.getElementById("up-description").value.trim() || null,
+      uploaded_by: "admin",
+      file_base64,
+      mime_type: file.type || "application/octet-stream",
+      size_bytes: file.size,
+    });
+    uploadStatus.textContent = "Uploaded!";
+    uploadForm.reset();
+    setTimeout(() => {
+      uploadContainer.style.display = "none";
+      uploadStatus.textContent = "";
+    }, 1200);
+    await loadDocs();
+  } catch (err) {
+    uploadError.textContent = "Error: " + err.message;
+    uploadError.style.display = "block";
+    uploadStatus.textContent = "";
+  } finally {
+    uploadSubmit.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
