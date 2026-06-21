@@ -263,19 +263,42 @@ const AppWithAuth = () => {
    Each panel falls back to simulated data when USE_LIVE_DATA = false
    or when the API call fails, so the dashboard always renders.
    ═══════════════════════════════════════════════ */
-const USE_LIVE_DATA = false; // flip to true once GK telemetry field names confirmed
+// Confirmed June 21, 2026 via GKOS Grafana Query Inspector
+// (gkoilfield.grafana.net/d/jopnxdw/tank-levels-double-eagle).
+// Schema: measurement = operator name; tags = Pad, Well, Tank (and likely Computer);
+// tank fields include "Fluid Volume" (gal), "Fluid Percentage" (%), "Pump Rate",
+// "Days Remaining", "Voltage". Sensor field names (ORP/pH/TDS/flow) still TBD
+// from a separate sensor dashboard — those panels will continue using simulated
+// data until discovered.
+const USE_LIVE_DATA = false; // flip to true once service-account token is in place
 const API_BASE = "https://supreme-otf-api.vercel.app";
-const API_FLEET = "Double Eagle"; // InfluxDB measurement (one of the 9 SCT fleets)
+const MEASUREMENT = "Double Eagle"; // InfluxDB measurement for production data
+
+// Per-tank tag triplets. JD to confirm exact GKOS naming for Bankhead pad once
+// computers are assigned. Pad/Well/Tank values below are placeholders.
+const TANK_TAGS = {
+  tq20:  { Pad: "Bankhead", Well: "Yard", Tank: "TQ-20"  }, // placeholder — confirm with GK
+  si211: { Pad: "Bankhead", Well: "Yard", Tank: "SI-211" }, // placeholder — confirm with GK
+  h2o2:  { Pad: "Bankhead", Well: "Yard", Tank: "H2O2"   }, // placeholder — confirm with GK
+};
+
 const FIELD_MAP = {
-  // Sensor fields (Live Dashboard tab)
-  orp:   { measurement: API_FLEET, field: "orp_mv"        }, // TBD from GK
-  ph:    { measurement: API_FLEET, field: "ph"            }, // TBD from GK
-  tds:   { measurement: API_FLEET, field: "tds_mgl"       }, // TBD from GK
-  flow:  { measurement: API_FLEET, field: "flow_bpm"      }, // TBD from GK
-  // Tank telemetry (Inventory & Cost tab) — JD chasing measurement/field names
-  tq20:  { measurement: API_FLEET, field: "tank_tq20_gal" }, // TBD from GK
-  si211: { measurement: API_FLEET, field: "tank_si211_gal"}, // TBD from GK
-  h2o2:  { measurement: API_FLEET, field: "tank_h2o2_gal" }, // TBD from GK
+  // Sensor fields (Live Dashboard tab) — STILL TBD, names below are guesses
+  orp:   { measurement: MEASUREMENT, field: "ORP"              , tags: null }, // TBD
+  ph:    { measurement: MEASUREMENT, field: "pH"               , tags: null }, // TBD
+  tds:   { measurement: MEASUREMENT, field: "TDS"              , tags: null }, // TBD
+  flow:  { measurement: MEASUREMENT, field: "Flow Rate"        , tags: null }, // TBD
+  // Tank telemetry (Inventory & Cost tab) — field names CONFIRMED, tag values pending
+  tq20:  { measurement: MEASUREMENT, field: "Fluid Volume"     , tags: TANK_TAGS.tq20  },
+  si211: { measurement: MEASUREMENT, field: "Fluid Volume"     , tags: TANK_TAGS.si211 },
+  h2o2:  { measurement: MEASUREMENT, field: "Fluid Volume"     , tags: TANK_TAGS.h2o2  },
+  // Auxiliary tank metrics (derived/displayed but not bound to TankLevel yet)
+  tq20_pct:   { measurement: MEASUREMENT, field: "Fluid Percentage", tags: TANK_TAGS.tq20  },
+  si211_pct:  { measurement: MEASUREMENT, field: "Fluid Percentage", tags: TANK_TAGS.si211 },
+  h2o2_pct:   { measurement: MEASUREMENT, field: "Fluid Percentage", tags: TANK_TAGS.h2o2  },
+  tq20_rate:  { measurement: MEASUREMENT, field: "Pump Rate"      , tags: TANK_TAGS.tq20  },
+  si211_rate: { measurement: MEASUREMENT, field: "Pump Rate"      , tags: TANK_TAGS.si211 },
+  h2o2_rate:  { measurement: MEASUREMENT, field: "Pump Rate"      , tags: TANK_TAGS.h2o2  },
 };
 
 /* ═══════════════════════════════════════════════
@@ -301,17 +324,31 @@ const INITIAL_TANKS = [
    a given measurement+field, or null on failure. The proxy is hardened
    with allow-lists (fleet, measurement, field) and a dev-key gate.
    ═══════════════════════════════════════════════ */
-async function fetchLatest(measurement, field) {
+async function fetchLatest(channelKey) {
   if (!USE_LIVE_DATA) return null;
+  const spec = FIELD_MAP[channelKey];
+  if (!spec) return null;
   try {
-    const q = `SELECT last("${field}") FROM "${measurement}" WHERE time > now() - 5m`;
-    const r = await fetch(`${API_BASE}/api/grafana-query?q=${encodeURIComponent(q)}`);
+    const r = await fetch(`${API_BASE}/api/grafana-query`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // Note: dev-key must be set on the server side; this fetch from the
+      // browser intentionally does not carry the dev-key (proxy will be updated
+      // to accept a referer-based gate from supreme-otf.com once we cut over).
+      body: JSON.stringify({
+        kind: "latest",
+        fleet: spec.measurement,
+        measurement: spec.measurement,
+        field: spec.field,
+        tags: spec.tags || undefined,
+      }),
+    });
     if (!r.ok) return null;
     const j = await r.json();
-    const v = j?.results?.[0]?.series?.[0]?.values?.[0]?.[1];
+    const v = j?.data?.results?.A?.frames?.[0]?.data?.values?.[1]?.[0];
     return (typeof v === "number") ? v : null;
   } catch (e) {
-    console.warn("[live] fetch failed:", measurement, field, e);
+    console.warn("[live] fetch failed:", channelKey, e);
     return null;
   }
 }
