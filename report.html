@@ -201,6 +201,8 @@ function render(r) {
         <div class="item"><div class="label">Technician</div><div class="value">${esc(data.technician || r.created_by || "—")}</div></div>
         <div class="item" style="grid-column: span 2"><div class="label">Weather</div><div class="value">${esc(data.weather || "—")}</div></div>
         <div class="item"><div class="label">Shift</div><div class="value">${esc(data.shift || "—")}</div></div>
+        <div class="item"><div class="label">Customer PO / AFE</div><div class="value">${esc(data.po_afe || "—")}</div></div>
+        <div class="item"><div class="label">SCT Job #</div><div class="value">${esc(data.sct_job_no || "—")}</div></div>
         <div class="item"><div class="label">Report ID</div><div class="value" style="font-family:ui-monospace,monospace;font-size:11px">${esc((r.id||"").slice(0,8))}</div></div>
       ` : `
         <div class="item"><div class="label">Job Start</div><div class="value">${fmtDate(r.period_start)}</div></div>
@@ -208,8 +210,11 @@ function render(r) {
         <div class="item"><div class="label">Pad</div><div class="value">${esc(r.pad || "—")}</div></div>
         <div class="item"><div class="label">Well / Tank</div><div class="value">${esc(r.well || r.tank || "—")}</div></div>
         <div class="item"><div class="label">Stages / Cycles</div><div class="value">${esc(data.stages || "—")}</div></div>
+        <div class="item"><div class="label">Total Fluid Pumped</div><div class="value">${data.total_bbl != null ? fmtNum(data.total_bbl, 0) + " bbl" : "—"}</div></div>
         <div class="item"><div class="label">Service Type</div><div class="value">${esc(data.service_type || "OTF")}</div></div>
         <div class="item"><div class="label">Job Lead</div><div class="value">${esc(data.job_lead || r.created_by || "—")}</div></div>
+        <div class="item"><div class="label">Customer PO / AFE</div><div class="value">${esc(data.po_afe || "—")}</div></div>
+        <div class="item"><div class="label">SCT Job #</div><div class="value">${esc(data.sct_job_no || "—")}</div></div>
         <div class="item"><div class="label">Report ID</div><div class="value" style="font-family:ui-monospace,monospace;font-size:11px">${esc((r.id||"").slice(0,8))}</div></div>
       `}
     </div>
@@ -303,6 +308,18 @@ function render(r) {
               <td class="num">${fmtMoney(totalCost)}</td>
               <td></td>
             </tr>
+            ${(() => {
+              const stagesNum = parseInt((data.stages || "").toString().replace(/[^0-9]/g, ""), 10);
+              const bblNum = Number(data.total_bbl || 0);
+              const rows = [];
+              if (stagesNum > 0) {
+                rows.push(`<tr><td style="text-align:right;color:#475569" colspan="3">Cost per stage (${stagesNum} stages)</td><td class="num">${fmtMoney(totalCost / stagesNum)}</td><td></td></tr>`);
+              }
+              if (bblNum > 0) {
+                rows.push(`<tr><td style="text-align:right;color:#475569" colspan="3">Cost per bbl (${fmtNum(bblNum, 0)} bbl)</td><td class="num">$${(totalCost / bblNum).toFixed(3)}</td><td></td></tr>`);
+              }
+              return rows.join("");
+            })()}
           </tbody>
         </table>
       </section>

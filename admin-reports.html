@@ -190,6 +190,8 @@
           <div><label>Technician</label><input type="text" id="f-technician" placeholder="Name" /></div>
           <div style="grid-column: span 2;"><label>Weather</label><input type="text" id="f-weather" placeholder="e.g. 95F, partly cloudy, light wind" /></div>
           <div><label>Shift</label><select id="f-shift"><option value="">—</option><option>Day</option><option>Night</option><option>24h</option></select></div>
+          <div><label>Customer PO / AFE / Ticket #</label><input type="text" id="f-po-afe-daily" placeholder="e.g. PO-44218" /></div>
+          <div><label>SCT Job #</label><input type="text" id="f-sct-job-daily" placeholder="e.g. SCT-2026-118" /></div>
           <div><label>Title (optional)</label><input type="text" id="f-title-daily" placeholder="Defaults to standard title" /></div>
         </div>
         <div id="header-eoj" class="grid-4" style="display:none;">
@@ -198,8 +200,11 @@
           <div><label>Pad</label><input type="text" id="f-pad-eoj" placeholder="e.g. Bankhead" /></div>
           <div><label>Well / Tank</label><input type="text" id="f-well-eoj" placeholder="e.g. 22-11W" /></div>
           <div><label>Stages / Cycles</label><input type="text" id="f-stages" placeholder="e.g. 42 stages" /></div>
+          <div><label>Total fluid pumped (bbl)</label><input type="number" id="f-total-bbl" step="1" placeholder="e.g. 184500" /></div>
           <div><label>Service type</label><input type="text" id="f-service-type" value="OTF" /></div>
           <div><label>Job lead</label><input type="text" id="f-job-lead" placeholder="Name" /></div>
+          <div><label>Customer PO / AFE / Ticket #</label><input type="text" id="f-po-afe-eoj" placeholder="e.g. PO-44218" /></div>
+          <div><label>SCT Job #</label><input type="text" id="f-sct-job-eoj" placeholder="e.g. SCT-2026-118" /></div>
           <div><label>Title (optional)</label><input type="text" id="f-title-eoj" placeholder="Defaults to standard title" /></div>
         </div>
       </div>
@@ -207,7 +212,7 @@
       <!-- Water Chemistry -->
       <div class="panel">
         <h3>Water Chemistry <span id="wc-mode-label" style="font-size:10px; color:rgba(255,255,255,0.4); margin-left:8px;">— manual entry</span></h3>
-        <div class="telemetry-note">Telemetry auto-fill activates once Tanhee provides the service-account token. Until then, enter values manually.</div>
+        <div class="telemetry-note">Telemetry auto-fill activates once the telemetry provider issues the service-account token. Until then, enter values manually.</div>
 
         <div id="wc-daily" style="margin-top:12px;">
           <table style="width:100%; border-collapse:collapse;">
@@ -601,6 +606,8 @@ function hydrate(r) {
     $("f-technician").value = d.technician || r.created_by || "";
     $("f-weather").value = d.weather || "";
     $("f-shift").value = d.shift || "";
+    $("f-po-afe-daily").value = d.po_afe || "";
+    $("f-sct-job-daily").value = d.sct_job_no || "";
     $("f-title-daily").value = r.title || "";
     $("wc-orp-in").value = wc.orp_inlet ?? "";
     $("wc-orp-out").value = wc.orp_outlet ?? "";
@@ -621,8 +628,11 @@ function hydrate(r) {
     $("f-pad-eoj").value = r.pad || "";
     $("f-well-eoj").value = r.well || r.tank || "";
     $("f-stages").value = d.stages || "";
+    $("f-total-bbl").value = d.total_bbl ?? "";
     $("f-service-type").value = d.service_type || "OTF";
     $("f-job-lead").value = d.job_lead || r.created_by || "";
+    $("f-po-afe-eoj").value = d.po_afe || "";
+    $("f-sct-job-eoj").value = d.sct_job_no || "";
     $("f-title-eoj").value = r.title || "";
     $("wc-orp-min").value = wc.orp_min ?? "";
     $("wc-orp-avg").value = wc.orp_avg ?? "";
@@ -671,6 +681,8 @@ function collectPayload() {
         technician: $("f-technician").value || null,
         weather: $("f-weather").value || null,
         shift: $("f-shift").value || null,
+        po_afe: $("f-po-afe-daily").value || null,
+        sct_job_no: $("f-sct-job-daily").value || null,
         water_chemistry: {
           orp_inlet: $("wc-orp-in").value || null,
           orp_outlet: $("wc-orp-out").value || null,
@@ -703,8 +715,11 @@ function collectPayload() {
       visible_to_customer: $("f-visible").checked,
       data: {
         stages: $("f-stages").value || null,
+        total_bbl: $("f-total-bbl").value ? Number($("f-total-bbl").value) : null,
         service_type: $("f-service-type").value || null,
         job_lead: $("f-job-lead").value || null,
+        po_afe: $("f-po-afe-eoj").value || null,
+        sct_job_no: $("f-sct-job-eoj").value || null,
         water_chemistry: {
           orp_min: $("wc-orp-min").value || null,
           orp_avg: $("wc-orp-avg").value || null,
