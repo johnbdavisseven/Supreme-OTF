@@ -413,6 +413,50 @@ async function fetchDocuments() {
   }
 }
 
+// Fetch published reports and map them onto the same shape as documents
+// so they can render in the same Documents list with a "Report" pill.
+async function fetchReports() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/reports-get`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ action: "list", customer_code: CUSTOMER_CODE }),
+    });
+    if (!res.ok) {
+      console.warn("[reports] fetch failed:", res.status, await res.text());
+      return { reports: [], error: `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    const rows = (data.reports || []).map(r => {
+      const isDaily = r.report_type === "daily";
+      const dateStr = isDaily ? r.report_date : r.period_end;
+      const padWell = [r.pad, r.well || r.tank].filter(Boolean).join(" / ");
+      const defaultTitle = isDaily
+        ? `Daily OTF Report — ${padWell || "—"}`
+        : `End of Job Report — ${padWell || "—"}`;
+      return {
+        id: `report:${r.id}`,
+        name: r.title || defaultTitle,
+        category: "Report",
+        report_type: r.report_type,
+        doc_date: dateStr || r.created_at,
+        size_bytes: null,
+        pad: r.pad || null,
+        well: r.well || r.tank || null,
+        signed_url: `report.html?id=${encodeURIComponent(r.id)}`,
+        created_at: r.created_at,
+      };
+    });
+    return { reports: rows, error: null };
+  } catch (e) {
+    console.warn("[reports] fetch error:", e);
+    return { reports: [], error: String(e) };
+  }
+}
+
 function formatBytes(b) {
   if (b == null) return "—";
   if (b < 1024) return `${b} B`;
@@ -614,15 +658,24 @@ function Dashboard({ userEmail, onLogout }) {
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState(null);
 
-  // Initial load + refresh whenever Documents tab is opened
+  // Initial load + refresh whenever Documents tab is opened.
+  // Fetches docs + published reports in parallel and merges them into one list.
   useEffect(() => {
     if (activeTab !== "documents") return;
     let cancelled = false;
     setDocsLoading(true);
-    fetchDocuments().then(({ documents, error }) => {
+    Promise.all([fetchDocuments(), fetchReports()]).then(([docsRes, reportsRes]) => {
       if (cancelled) return;
-      setDocs(documents);
-      setDocsError(error);
+      const merged = [...(reportsRes.reports || []), ...(docsRes.documents || [])];
+      // Sort by doc_date / created_at desc so newest items surface first
+      merged.sort((a, b) => {
+        const da = new Date(a.doc_date || a.created_at || 0).getTime();
+        const db = new Date(b.doc_date || b.created_at || 0).getTime();
+        return db - da;
+      });
+      setDocs(merged);
+      // Surface docs error but tolerate reports error silently — reports are additive
+      setDocsError(docsRes.error);
       setDocsLoading(false);
     });
     return () => { cancelled = true; };
@@ -1024,6 +1077,7 @@ function Dashboard({ userEmail, onLogout }) {
             <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
               {[
                 {id:"All", label:"All Documents"},
+                {id:"Report", label:"OTF Reports"},
                 {id:"SDS", label:"Safety Data Sheets"},
                 {id:"Field", label:"Field Reports"},
                 {id:"Lab", label:"Lab Reports"},
@@ -1056,14 +1110,15 @@ function Dashboard({ userEmail, onLogout }) {
                 </div>
               )}
               {!docsLoading && filteredDocs.map((doc,i) => {
-                const catColors = { SDS:"#ef4444", Field:"#22d3ee", Lab:"#a78bfa", Permit:"#f59e0b", Other:"#64748b" };
+                const catColors = { SDS:"#ef4444", Field:"#22d3ee", Lab:"#a78bfa", Permit:"#f59e0b", Report:"#fbbf24", Other:"#64748b" };
                 const c = catColors[doc.category] || "#64748b";
+                const isReport = doc.category === "Report";
                 const handleDownload = (e) => {
                   e.stopPropagation();
                   if (doc.signed_url) {
                     window.open(doc.signed_url, "_blank", "noopener,noreferrer");
                   } else {
-                    alert("Download link not available. Please refresh and try again.");
+                    alert(isReport ? "Report link not available. Please refresh and try again." : "Download link not available. Please refresh and try again.");
                   }
                 };
                 return (
@@ -1075,13 +1130,13 @@ function Dashboard({ userEmail, onLogout }) {
                     <div style={{ display:"flex", alignItems:"center", gap:14, minWidth:0 }}>
                       <div style={{ width:36, height:36, borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
                         background:`${c}15`, color:c }}>
-                        <Icon type={doc.category==="SDS" ? "shield" : "file"} size={16}/>
+                        <Icon type={doc.category==="SDS" ? "shield" : (isReport ? "log" : "file")} size={16}/>
                       </div>
                       <div style={{ minWidth:0 }}>
                         <div style={{ fontSize:13, fontWeight:500, color:"rgba(255,255,255,0.85)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{doc.name}</div>
                         <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)", marginTop:2 }}>
-                          <span style={{ display:"inline-block", padding:"1px 6px", borderRadius:3, fontSize:10, fontWeight:600, marginRight:8, background:`${c}15`, color:c }}>{doc.category}</span>
-                          {formatDate(doc.doc_date || doc.created_at)} · {formatBytes(doc.size_bytes)}
+                          <span style={{ display:"inline-block", padding:"1px 6px", borderRadius:3, fontSize:10, fontWeight:600, marginRight:8, background:`${c}15`, color:c }}>{isReport ? (doc.report_type==="daily" ? "Daily Report" : "End of Job") : doc.category}</span>
+                          {formatDate(doc.doc_date || doc.created_at)}{!isReport && ` · ${formatBytes(doc.size_bytes)}`}
                           {doc.pad && <span style={{ marginLeft:8, color:"rgba(255,255,255,0.4)" }}>· {doc.pad}{doc.well ? ` / ${doc.well}` : ""}</span>}
                         </div>
                       </div>
@@ -1094,7 +1149,7 @@ function Dashboard({ userEmail, onLogout }) {
                       borderColor: hoveredDoc===doc.id ? "rgba(34,211,238,0.3)" : "rgba(255,255,255,0.08)",
                       transition:"all 0.15s", fontFamily:"'DM Sans',sans-serif",
                     }}>
-                      <Icon type="download" size={12}/> Download
+                      <Icon type="download" size={12}/> {isReport ? "Open" : "Download"}
                     </button>
                   </div>
                 );
