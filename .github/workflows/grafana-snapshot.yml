@@ -1,0 +1,48 @@
+name: grafana-snapshot
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grafana-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright (Chromium)
+        run: |
+          npm init -y >/dev/null 2>&1 || true
+          npm install playwright@^1.49 >/dev/null 2>&1
+          npx playwright install --with-deps chromium
+
+      - name: Run Grafana snapshot
+        env:
+          GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
+          GRAFANA_PASS: ${{ secrets.GRAFANA_PASS }}
+          GRAFANA_BASE: https://gkoilfield.grafana.net
+          DASH_PATH: /d/tasp46j/supreme-on-the-fly-water-treatment
+          PAD: 'DAUNTLESS EAST'
+        run: node scripts/grafana-snapshot.mjs
+
+      - name: Upload snapshot (private artifact, not public)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grafana-snapshot
+          path: data/
+          retention-days: 7
