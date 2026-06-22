@@ -465,7 +465,11 @@ function formatBytes(b) {
 }
 function formatDate(s) {
   if (!s) return "—";
-  const d = new Date(s);
+  // Bare YYYY-MM-DD parses as UTC midnight in JS, which shifts the displayed
+  // date back by one day in Central time. Append a local-midnight time to
+  // force the runtime to parse it in the user's timezone.
+  const isDateOnly = typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const d = new Date(isDateOnly ? `${s}T00:00:00` : s);
   if (isNaN(d.getTime())) return s;
   return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`;
 }
