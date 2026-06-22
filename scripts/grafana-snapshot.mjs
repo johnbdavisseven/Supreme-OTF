@@ -106,30 +106,89 @@ page.on('response', async (res) => {
   } catch {}
 });
 
+// Always-on login diagnostics: a failed login should still leave evidence in
+// the artifact (page structure + screenshot), never an empty one. Captures
+// element attributes only, blanks password fields first, never field values.
+async function writeLoginDiagnostics(tag) {
+  try {
+    mkdirSync('data', { recursive: true });
+    await page.evaluate(() => {
+      document.querySelectorAll('input[type="password"]').forEach((i) => { i.value = ''; });
+    }).catch(() => {});
+    const inventory = await page.evaluate(() => {
+      const grab = (els) => [...els].map((e) => ({
+        tag: e.tagName.toLowerCase(),
+        type: e.getAttribute('type'),
+        name: e.getAttribute('name'),
+        id: e.getAttribute('id'),
+        placeholder: e.getAttribute('placeholder'),
+        autocomplete: e.getAttribute('autocomplete'),
+        ariaLabel: e.getAttribute('aria-label'),
+        testid: e.getAttribute('data-testid'),
+        text: (e.innerText || '').trim().slice(0, 40),
+      }));
+      return {
+        url: location.href,
+        title: document.title,
+        inputs: grab(document.querySelectorAll('input')),
+        buttons: grab(document.querySelectorAll('button')),
+        links: grab(document.querySelectorAll('a')).slice(0, 30),
+      };
+    }).catch((e) => ({ error: String(e) }));
+    writeFileSync('data/login-debug.json', JSON.stringify({ tag, generatedAt: new Date().toISOString(), inventory }, null, 2));
+    await page.screenshot({ path: 'data/login-debug.png', fullPage: true }).catch(() => {});
+    try { writeFileSync('data/login-debug.html', await page.content()); } catch {}
+  } catch (e) {
+    console.error('login diagnostics failed:', String(e));
+  }
+}
+
 // 1) Log in
 await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-const userSelectors = ['input[name="user"]', 'input[name="login"]', 'input[name="email"]', 'input[type="email"]'];
-const passSelectors = ['input[name="password"]', 'input[type="password"]'];
+const userSelectors = [
+  'input[name="user"]', 'input[name="login"]', 'input[name="email"]',
+  'input[autocomplete="username"]', 'input[data-testid="data-testid Username input field"]',
+  'input[aria-label="Username input field"]', 'input[type="email"]', 'input[type="text"]',
+];
+const passSelectors = [
+  'input[name="password"]', 'input[type="password"]',
+  'input[autocomplete="current-password"]', 'input[data-testid="data-testid Password input field"]',
+];
 
-async function fillFirst(selectors, value) {
-  for (const sel of selectors) {
-    const el = await page.$(sel);
-    if (el) { await el.fill(value); return true; }
-  }
-  return false;
-}
-
-const gotUser = await fillFirst(userSelectors, USER);
-const gotPass = await fillFirst(passSelectors, PASS);
-if (!gotUser || !gotPass) {
-  console.error(`Could not find login fields at ${page.url()} (title: "${await page.title()}").`);
-  console.error('The login page may use SSO. Adjust selectors after inspecting it.');
+// Grafana's login form is client-rendered, so domcontentloaded fires before
+// the inputs mount. Wait for the form to appear before filling it.
+const formAppeared = await page
+  .waitForSelector([...userSelectors, ...passSelectors].join(', '), { timeout: 30000 })
+  .then(() => true)
+  .catch(() => false);
+if (!formAppeared) {
+  console.error(`Login form never rendered at ${page.url()} (title: "${await page.title()}").`);
+  console.error('Wrote data/login-debug.* for inspection. The page may use SSO or a different form.');
+  await writeLoginDiagnostics('form-never-rendered');
   await browser.close();
   process.exit(2);
 }
 
-for (const sel of ['button[type="submit"]', 'button:has-text("Log in")', 'button:has-text("Login")']) {
+async function fillFirst(selectors, value) {
+  for (const sel of selectors) {
+    const el = await page.$(sel);
+    if (el && (await el.isVisible().catch(() => false))) { await el.fill(value); return sel; }
+  }
+  return null;
+}
+
+const userSel = await fillFirst(userSelectors, USER);
+const passSel = await fillFirst(passSelectors, PASS);
+if (!userSel || !passSel) {
+  console.error(`Could not fill login fields at ${page.url()} (title: "${await page.title()}"). userSel=${userSel} passSel=${passSel}`);
+  console.error('Wrote data/login-debug.* with the input inventory so selectors can be corrected.');
+  await writeLoginDiagnostics('fields-not-fillable');
+  await browser.close();
+  process.exit(2);
+}
+
+for (const sel of ['button[type="submit"]', 'button[data-testid="data-testid Login button"]', 'button:has-text("Log in")', 'button:has-text("Login")', 'button:has-text("Sign in")']) {
   const b = await page.$(sel);
   if (b) { await b.click(); break; }
 }
@@ -139,6 +198,7 @@ await page.waitForLoadState('networkidle').catch(() => {});
 try { const skip = await page.$('button:has-text("Skip")'); if (skip) await skip.click(); } catch {}
 await page.waitForTimeout(2000);
 const loggedIn = !page.url().includes('/login');
+if (!loggedIn) { await writeLoginDiagnostics('login-failed-after-submit'); }
 
 // 2) Open the dashboard for the last 24h so its panels run their queries
 const sep = DASH_PATH.includes('?') ? '&' : '?';
