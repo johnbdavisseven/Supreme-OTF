@@ -35,8 +35,7 @@ jobs:
           GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
           GRAFANA_PASS: ${{ secrets.GRAFANA_PASS }}
           GRAFANA_BASE: https://gkoilfield.grafana.net
-          DASH_PATH: /d/tasp46j/supreme-on-the-fly-water-treatment
-          PAD: 'DAUNTLESS EAST'
+          DASH_PATHS: /d/tasp46j/supreme-on-the-fly-water-treatment,/d/tan2hlz/supreme-on-the-fly-tank-levels
         run: node scripts/grafana-snapshot.mjs
 
       - name: Upload snapshot (private artifact, not public)

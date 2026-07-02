@@ -1,0 +1,8 @@
+# Snapshot outputs must never land in the repo tree: main is served publicly
+# by GitHub Pages at supreme-otf.com, so committing data/ would publish it.
+data/
+
+# Local tooling
+node_modules/
+package.json
+package-lock.json

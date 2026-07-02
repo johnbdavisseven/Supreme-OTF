@@ -12,14 +12,16 @@
 // Env (set by the GitHub Actions workflow):
 //   GRAFANA_USER, GRAFANA_PASS  - your Grafana login (from repo secrets)
 //   GRAFANA_BASE                - https://gkoilfield.grafana.net
-//   DASH_PATH                   - /d/tasp46j/supreme-on-the-fly-water-treatment
-//   PAD                         - pad to filter to (e.g. DAUNTLESS EAST)
+//   DASH_PATHS                  - comma-separated dashboard paths to capture.
+//                                 Template vars are NOT forced; each dashboard
+//                                 loads with its saved defaults (Bankhead).
 
 import { chromium } from 'playwright';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
 const BASE = (process.env.GRAFANA_BASE || 'https://gkoilfield.grafana.net').replace(/\/$/, '');
 const DASH_PATH = process.env.DASH_PATH || '/d/tasp46j/supreme-on-the-fly-water-treatment';
+const DASH_PATHS = (process.env.DASH_PATHS || DASH_PATH).split(',').map((s) => s.trim()).filter(Boolean);
 const PAD = process.env.PAD || '';
 const USER = process.env.GRAFANA_USER;
 const PASS = process.env.GRAFANA_PASS;
@@ -102,7 +104,7 @@ page.on('response', async (res) => {
     const json = await res.json();
     let request = null;
     try { request = JSON.parse(res.request().postData() || 'null'); } catch {}
-    captured.push({ url: res.url(), status: res.status(), request, response: json });
+    captured.push({ url: res.url(), status: res.status(), pageUrl: page.url(), request, response: json });
   } catch {}
 });
 
@@ -200,21 +202,27 @@ await page.waitForTimeout(2000);
 const loggedIn = !page.url().includes('/login');
 if (!loggedIn) { await writeLoginDiagnostics('login-failed-after-submit'); }
 
-// 2) Open the dashboard for the last 24h so its panels run their queries
-const sep = DASH_PATH.includes('?') ? '&' : '?';
-let dashUrl = `${BASE}${DASH_PATH}${sep}orgId=1&from=now-24h&to=now`;
-if (PAD) dashUrl += `&var-Pad=${encodeURIComponent(PAD)}`;
-await page.goto(dashUrl, { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {});
+// 2) Open each dashboard for the last 24h so its panels run their queries.
+// Template vars are not forced; dashboards load with their saved defaults
+// (Bankhead / Double Eagle per GK's July 2026 layout).
+const dashUrls = [];
+for (const dp of DASH_PATHS) {
+  const sep = dp.includes('?') ? '&' : '?';
+  let dashUrl = `${BASE}${dp}${sep}orgId=1&from=now-24h&to=now`;
+  if (PAD) dashUrl += `&var-Pad=${encodeURIComponent(PAD)}`;
+  dashUrls.push(dashUrl);
+  await page.goto(dashUrl, { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {});
 
-// nudge lazy-loaded panels into view
-for (let y = 0; y < 4; y++) { await page.mouse.wheel(0, 1200); await page.waitForTimeout(1500); }
-await page.waitForTimeout(4000);
+  // nudge lazy-loaded panels into view
+  for (let y = 0; y < 4; y++) { await page.mouse.wheel(0, 1200); await page.waitForTimeout(1500); }
+  await page.waitForTimeout(4000);
+}
 
 // 3) Write outputs
 mkdirSync('data', { recursive: true });
 writeFileSync(
   'data/grafana-discovery.json',
-  JSON.stringify({ generatedAt: new Date().toISOString(), dashUrl, loggedIn, queryCount: captured.length, captured }, null, 2)
+  JSON.stringify({ generatedAt: new Date().toISOString(), dashUrls, loggedIn, queryCount: captured.length, captured }, null, 2)
 );
 
 const series = extractSeries(captured);
@@ -224,6 +232,7 @@ writeFileSync(
     {
       updatedAt: new Date().toISOString(),
       pad: PAD || null,
+      dashboards: DASH_PATHS,
       source: 'GK Grafana, headless session scrape of /api/ds/query',
       loggedIn,
       queryCount: captured.length,
