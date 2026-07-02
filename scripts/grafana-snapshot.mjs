@@ -79,7 +79,11 @@ function seriesFromFrames(frames, fallbackName) {
     for (let i = 0; i < fields.length; i++) {
       if (i === tIdx || fields[i].type !== 'number') continue;
       const labels = fields[i].labels || {};
-      const fieldName = fields[i].config?.displayNameFromDS || fields[i].name || fallbackName;
+      // Strip the measurement prefix and any trailing "{tag: value}" block
+      // Grafana appends, so keys come out clean: orp_inlet, fluid_volume_si_211.
+      const fieldName = (fields[i].config?.displayNameFromDS || fields[i].name || fallbackName)
+        .replace(/\s*\{[^}]*\}\s*$/, '')
+        .replace(/^Double Eagle\./, '');
       const pts = [];
       const times = tIdx >= 0 ? values[tIdx] || [] : [];
       for (let j = 0; j < (values[i] || []).length; j++) {
@@ -187,10 +191,10 @@ const M = '"Double Eagle"';
 const T24 = 'time > now() - 24h';
 const G1H = 'GROUP BY time(1h)';
 const TARGETS = [
-  { refId: 'orp',   label: 'ORP',        sql: `SELECT MEAN("ORP") FROM ${M} WHERE "Location"::tag =~ /^(Inlet|Outlet)$/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
-  { refId: 'ph',    label: 'pH',         sql: `SELECT MEAN("pH") FROM ${M} WHERE "Location"::tag =~ /^(Inlet|Outlet)$/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
-  { refId: 'flow',  label: 'Flow Rate',  sql: `SELECT MEAN("Pump Rate") FROM ${M} WHERE "Location"::tag =~ /^Flowmeter/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
-  { refId: 'pumps', label: 'Pump Rate',  sql: `SELECT MEAN("Pump Rate") FROM ${M} WHERE "Location"::tag =~ /^Pump [0-9]/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
+  { refId: 'orp',   label: 'ORP',        sql: `SELECT MEAN("ORP") AS "ORP" FROM ${M} WHERE "Location"::tag =~ /^(Inlet|Outlet)$/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
+  { refId: 'ph',    label: 'pH',         sql: `SELECT MEAN("pH") AS "pH" FROM ${M} WHERE "Location"::tag =~ /^(Inlet|Outlet)$/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
+  { refId: 'flow',  label: 'Flow Rate',  sql: `SELECT MEAN("Pump Rate") AS "Flow Rate" FROM ${M} WHERE "Location"::tag =~ /^Flowmeter/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
+  { refId: 'pumps', label: 'Pump Rate',  sql: `SELECT MEAN("Pump Rate") AS "Pump Rate" FROM ${M} WHERE "Location"::tag =~ /^Pump [0-9]/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
   { refId: 'tanks', label: 'Tank',       sql: `SELECT MEAN("Fluid Volume") AS "Fluid Volume", MEAN("Fluid Percentage") AS "Fluid Percentage" FROM ${M} WHERE "Location"::tag = 'Tank' AND ${T24} ${G1H}, "Well"::tag fill(null)` },
   { refId: 'chem',  label: 'Chemistry',  sql: `SELECT MEAN("Conductivity") AS "Conductivity", MEAN("TDS") AS "TDS", MEAN("Chlorides") AS "Chlorides", MEAN("Dissolved Oxygen") AS "Dissolved Oxygen", MEAN("Corrosion") AS "Corrosion", MEAN("Specific Gravity") AS "Specific Gravity", MEAN("LSI") AS "LSI", MEAN("Stiff and Davis") AS "Stiff and Davis", MEAN("H2S") AS "H2S", MEAN("Temperature") AS "Temperature" FROM ${M} WHERE ${T24} ${G1H} fill(null)` },
 ];

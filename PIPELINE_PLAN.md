@@ -34,14 +34,29 @@ sensor data (hourly refresh), and the "Open in Grafana" button becomes
       Treatment Effect = Grafana expression (compute app-side); GK quirk:
       their "Temperature" stat actually reads pH — we bypass with our own
       queries. Datasource uid c22413e3-e707-4321-bf14-85623533c02e confirmed.
-- [ ] Phase 1: targeted InfluxQL queries replace passive panel capture
+- [x] Phase 1: DONE 2026-07-02 (validated run 28565630863: plain-HTTP login,
+      6 queries, ~1s, 63 series). Targeted InfluxQL queries replace passive
+      panel capture
       (stable series naming: measurement/field/Location), min/max via reduce,
       no capture race, keep login diagnostics + fail-loud exits (2/3/4).
-- [ ] Phase 2: Supabase (project bfpsvvojskrbzrhcuuwe): live_snapshot table
+- [x] Phase 2: DONE 2026-07-02, expanded to include server-side portal auth
+      per JD. Tables live_snapshot + portal_users + portal_sessions +
+      portal_config (all RLS on, zero policies, service-role-only via edge
+      fns). Edge fns: portal-login/portal-logout (session tokens),
+      snapshot-put (x-snapshot-key, sha256 fingerprint embedded; plaintext
+      only in GitHub secret SNAPSHOT_WRITE_KEY), snapshot-get (session
+      required), docs-list + reports-get patched with enforcement gated by
+      portal_config.enforce_portal_auth (currently 'false'; flip to 'true'
+      right after the front-end PR merges — that is the auth cutover step).
+      All 9 smoke tests passed. Original plan item: live_snapshot table
       (RLS on), snapshot-put edge fn gated by x-snapshot-key header matching
       SNAPSHOT_WRITE_KEY (mirror reports-admin), snapshot-get public read
       (mirror reports-get). Workflow POSTs rollup after each run.
-- [ ] Phase 3: index.html — tiles read snapshot-get (same pattern as
+- [x] Phase 3: DONE 2026-07-02 (browser verification pending). Also swapped
+      the client-side credential list for portal-login sessions, wired tank
+      tiles to snapshot volumes, and ppm is computed from real flowmeter
+      rate (hidden while flow is 0) instead of GK's hardcoded 252,000 GPH.
+      Original plan item: index.html — tiles read snapshot-get (same pattern as
       fetchReports ~line 419), badge "24-hr snapshot · as of HH:MM",
       "Open in Grafana" button (~line 831-851) renamed "Live View",
       stale-guard (>2h old -> delayed-data state, keep mock fallback).
