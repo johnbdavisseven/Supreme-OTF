@@ -352,6 +352,36 @@ async function fetchSnapshot() {
   }
 }
 
+// 7-day usage history: daily tank drawdown + treated volume, computed
+// server-side from the retained hourly snapshots. Same session gating.
+async function fetchSnapshotHistory() {
+  const sess = portalSession();
+  if (!sess) return [];
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/snapshot-get`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        "x-portal-session": sess.token,
+      },
+      body: JSON.stringify({ action: "history" }),
+    });
+    if (!res.ok) return [];
+    const j = await res.json();
+    return (j.days || []).map(d => ({
+      date: String(d.date).slice(5).replace("-", "/"),
+      bbl: Math.round(d.bbl || 0),
+      tq20: +(d.tq20_gal || 0),
+      si211: +(d.si211_gal || 0),
+      h2o2: +(d.h2o2_gal || 0),
+    }));
+  } catch (e) {
+    console.warn("[history] fetch failed:", e);
+    return [];
+  }
+}
+
 /* ═══════════════════════════════════════════════
    SUPABASE DOCUMENT BACKEND
    ═══════════════════════════════════════════════ */
@@ -546,7 +576,7 @@ const Sparkline = ({ data, color="#22d3ee", height=48 }) => {
    ═══════════════════════════════════════════════ */
 const CostChart = ({ data }) => {
   const costs = data.map(d => d.tq20*8.95 + d.si211*3.00 + d.h2o2*2.15);
-  const maxCost = Math.max(...costs);
+  const maxCost = Math.max(...costs, 1); // floor avoids NaN heights on all-zero days
   return (
     <div style={{ display:"flex", alignItems:"flex-end", gap:8, height:100, padding:"0 4px" }}>
       {data.map((d,i) => {
@@ -646,7 +676,16 @@ function Dashboard({ userEmail, onLogout }) {
   const snapFresh = snapAgeHrs <= SNAPSHOT_STALE_HOURS;
   const sv = (key) => (snap && snap.byKey[key]) || null;
   const svLatest = (key) => { const s = sv(key); return s && typeof s.latest === "number" ? s.latest : null; };
+  const svMean = (key) => { const s = sv(key); return s && typeof s.mean24h === "number" ? s.mean24h : null; };
   const pos = (v) => (v == null ? 0 : Math.max(0, v));
+
+  // 7-day usage history (real tank drawdown) for the Inventory cost trend
+  const [histDays, setHistDays] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchSnapshotHistory().then(d => { if (!cancelled && d.length) setHistDays(d); });
+    return () => { cancelled = true; };
+  }, []);
 
   // Initial load + refresh whenever Documents tab is opened.
   // Fetches docs + published reports in parallel and merges them into one list.
@@ -695,45 +734,51 @@ function Dashboard({ userEmail, onLogout }) {
     return () => clearInterval(iv);
   }, []);
 
+  // Usage series: real daily tank drawdown from the snapshot history once
+  // available (fills out to 7 days as history accrues); placeholder otherwise.
+  const usage = histDays.length ? histDays : DAILY_USAGE;
+  const usageReal = histDays.length > 0;
   // Today's cost
-  const today = DAILY_USAGE[DAILY_USAGE.length-1];
+  const today = usage[usage.length-1];
   const costTQ20  = today.tq20  * 8.95;
   const costSI211 = today.si211 * 3.00;
   const costH2O2  = today.h2o2  * 2.15;
   const totalCost = costTQ20 + costSI211 + costH2O2;
-  const costPerBbl = totalCost / today.bbl;
+  const costPerBbl = today.bbl > 0 ? totalCost / today.bbl : null;
 
   // 7-day totals
-  const weekTotals = DAILY_USAGE.reduce((acc,d) => ({
+  const weekTotals = usage.reduce((acc,d) => ({
     bbl: acc.bbl+d.bbl, tq20: acc.tq20+d.tq20, si211: acc.si211+d.si211, h2o2: acc.h2o2+d.h2o2
   }), {bbl:0,tq20:0,si211:0,h2o2:0});
   const weekCost = weekTotals.tq20*8.95 + weekTotals.si211*3.00 + weekTotals.h2o2*2.15;
 
   // Snapshot-backed view of the dashboard numbers; falls back to the
   // simulator per-field when the snapshot is missing or stale.
+  // The portal shows 24-HOUR AVERAGES by design — real-time readings live in
+  // Grafana behind the Live View button. Tanks are the exception (last reading).
   const useSnap = snap != null && snapFresh;
-  const doseSI211 = pos(svLatest("pump_rate_pump_1")) + pos(svLatest("pump_rate_pump_2"));
-  const doseTQ20  = pos(svLatest("pump_rate_pump_3")) + pos(svLatest("pump_rate_pump_4"));
-  const doseH2O2  = pos(svLatest("pump_rate_pump_5")) + pos(svLatest("pump_rate_pump_6"));
+  const doseSI211 = pos(svMean("pump_rate_pump_1")) + pos(svMean("pump_rate_pump_2"));
+  const doseTQ20  = pos(svMean("pump_rate_pump_3")) + pos(svMean("pump_rate_pump_4"));
+  const doseH2O2  = pos(svMean("pump_rate_pump_5")) + pos(svMean("pump_rate_pump_6"));
   const view = useSnap ? {
-    inletORP:  svLatest("orp_inlet")  ?? data.inletORP,
-    outletORP: svLatest("orp_outlet") ?? data.outletORP,
-    inletPH:   svLatest("ph_inlet")   ?? data.inletPH,
-    outletPH:  svLatest("ph_outlet")  ?? data.outletPH,
-    flowRate:  pos(svLatest("flow_rate_flowmeter_1")) + pos(svLatest("flow_rate_flowmeter_2")),
-    tds: svLatest("tds") ?? data.tds,
+    inletORP:  svMean("orp_inlet")  ?? data.inletORP,
+    outletORP: svMean("orp_outlet") ?? data.outletORP,
+    inletPH:   svMean("ph_inlet")   ?? data.inletPH,
+    outletPH:  svMean("ph_outlet")  ?? data.outletPH,
+    flowRate:  pos(svMean("flow_rate_flowmeter_1")) + pos(svMean("flow_rate_flowmeter_2")),
+    tds: svMean("tds") ?? data.tds,
     statics: {
-      chlorides:    svLatest("chlorides")        ?? data.statics.chlorides,
-      conductivity: svLatest("conductivity")     ?? data.statics.conductivity,
-      temperature:  svLatest("temperature")      ?? data.statics.temperature,
-      do:           svLatest("dissolved_oxygen") ?? data.statics.do,
-      cr:           svLatest("corrosion")        ?? data.statics.cr,
-      sg:           svLatest("specific_gravity") ?? data.statics.sg,
-      lsi:          svLatest("lsi")              ?? data.statics.lsi,
-      stiffDavis:   svLatest("stiff_and_davis")  ?? data.statics.stiffDavis,
+      chlorides:    svMean("chlorides")        ?? data.statics.chlorides,
+      conductivity: svMean("conductivity")     ?? data.statics.conductivity,
+      temperature:  svMean("temperature")      ?? data.statics.temperature,
+      do:           svMean("dissolved_oxygen") ?? data.statics.do,
+      cr:           svMean("corrosion")        ?? data.statics.cr,
+      sg:           svMean("specific_gravity") ?? data.statics.sg,
+      lsi:          svMean("lsi")              ?? data.statics.lsi,
+      stiffDavis:   svMean("stiff_and_davis")  ?? data.statics.stiffDavis,
     },
     dose: { tq20: doseTQ20, si211: doseSI211, h2o2: doseH2O2 },
-    h2o2Active: (svLatest("orp_inlet") ?? 0) < 0 && doseH2O2 > 0.5,
+    h2o2Active: (svMean("orp_inlet") ?? 0) < 0 && doseH2O2 > 0.5,
     orpHistory: (sv("orp_outlet")?.hourly?.length
       ? sv("orp_outlet").hourly.map((h, i) => ({ t: i, v: h.avg }))
       : data.orpHistory),
@@ -741,7 +786,7 @@ function Dashboard({ userEmail, onLogout }) {
   // Header badge: fresh snapshot / delayed snapshot / simulated
   const fmtSnapTime = snap ? new Date(snap.updatedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
   const badge = useSnap
-    ? { color: "#22c55e", text: `24-HR SNAPSHOT · AS OF ${fmtSnapTime}` }
+    ? { color: "#22c55e", text: `24-HR AVERAGE · AS OF ${fmtSnapTime}` }
     : snap
     ? { color: "#f59e0b", text: `DATA DELAYED · LAST ${fmtSnapTime}` }
     : { color: "#94a3b8", text: "SIMULATED · SNAPSHOT PENDING" };
@@ -904,7 +949,7 @@ function Dashboard({ userEmail, onLogout }) {
 
             {/* ═══ GROUP 1: CONTROL LOOP ═══ */}
             <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(34,211,238,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
-              {sectionHeader("Control Loop", "Inputs drive treatment · Outputs prove it worked", "#22d3ee")}
+              {sectionHeader("Control Loop", useSnap ? "24-hr averages · real-time in Live View" : "Inputs drive treatment · Outputs prove it worked", "#22d3ee")}
               {/* Inlet vs Outlet table */}
               <div style={{ display:"grid", gridTemplateColumns:"1.4fr 1fr 1fr 1fr", gap:0, alignItems:"center", marginBottom:14 }}>
                 {/* Header row */}
@@ -965,7 +1010,7 @@ function Dashboard({ userEmail, onLogout }) {
 
             {/* ═══ GROUP 2: WATER CHEMISTRY ═══ */}
             <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(167,139,250,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
-              {sectionHeader("Water Chemistry", "Static water profile · single reading sufficient", "#a78bfa")}
+              {sectionHeader("Water Chemistry", useSnap ? "24-hr averages" : "Static water profile · single reading sufficient", "#a78bfa")}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:18 }}>
                 {[
                   ["TDS",            data.tds.toLocaleString(),                "mg/L"],
@@ -990,7 +1035,7 @@ function Dashboard({ userEmail, onLogout }) {
 
             {/* ═══ GROUP 3: CHEMICAL DOSING ═══ */}
             <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(34,197,94,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
-              {sectionHeader("Chemical Dosing", "Live pump injection rates", "#22c55e")}
+              {sectionHeader("Chemical Dosing", useSnap ? "24-hr average injection rates" : "Pump injection rates", "#22c55e")}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:16 }}>
                 {/* TQ-20 — metered via 'Corrosion' raw field @ Inlet */}
                 <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(34,197,94,0.15)" }}>
@@ -1007,7 +1052,7 @@ function Dashboard({ userEmail, onLogout }) {
                   <div style={{ fontSize:10, color:"rgba(255,255,255,0.45)", marginTop:6, fontFamily:"'JetBrains Mono',monospace" }}>
                     {ppmOf(data.dose.tq20) != null ? `≈ ${ppmOf(data.dose.tq20).toFixed(1)} ppm · ` : ""}${(data.dose.tq20 * 8.95).toFixed(2)}/hr
                   </div>
-                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr snapshot · GK pumps 3+4" : "Simulated"}</div>
+                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr avg · GK pumps 3+4" : "Simulated"}</div>
                 </div>
                 {/* SI-211 — metered via 'H2S' raw field @ Inlet (multiplexed) */}
                 <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(34,197,94,0.15)" }}>
@@ -1024,7 +1069,7 @@ function Dashboard({ userEmail, onLogout }) {
                   <div style={{ fontSize:10, color:"rgba(255,255,255,0.45)", marginTop:6, fontFamily:"'JetBrains Mono',monospace" }}>
                     {ppmOf(data.dose.si211) != null ? `≈ ${ppmOf(data.dose.si211).toFixed(1)} ppm · ` : ""}${(data.dose.si211 * 2.10).toFixed(2)}/hr
                   </div>
-                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr snapshot · GK pumps 1+2" : "Simulated"}</div>
+                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr avg · GK pumps 1+2" : "Simulated"}</div>
                 </div>
                 {/* H2O2 — standby on Job 1 fresh water; field-collision flagged */}
                 <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px dashed rgba(255,255,255,0.1)", opacity:0.85 }}>
@@ -1038,8 +1083,8 @@ function Dashboard({ userEmail, onLogout }) {
                   <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:24, fontWeight:600, color: data.h2o2Active ? "#e2e8f0" : "rgba(255,255,255,0.4)" }}>
                     {data.h2o2Active ? <>{data.dose.h2o2.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>GPH</span></> : "STANDBY"}
                   </div>
-                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>{data.h2o2Active ? "Demand injection in progress" : "Idle — deploys when inlet ORP turns negative"}</div>
-                  <div style={{ fontSize:9, color:"rgba(251,191,36,0.55)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr snapshot · GK pumps 5+6" : "Simulated"}</div>
+                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>{data.h2o2Active ? "Demand injection in progress" : "Not in use — fresh water job (no recycled produced water)"}</div>
+                  <div style={{ fontSize:9, color:"rgba(251,191,36,0.55)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr avg · GK pumps 5+6" : "Simulated"}</div>
                 </div>
               </div>
             </div>
@@ -1063,7 +1108,7 @@ function Dashboard({ userEmail, onLogout }) {
           <div className="fade-in">
             {/* Tanks */}
             <div style={{ fontSize:12, color:"rgba(255,255,255,0.35)", marginBottom:16, letterSpacing:0.5 }}>
-              {useSnap ? `Tank levels from the hourly GK snapshot (as of ${fmtSnapTime}). Cost calculated from actual metered usage.` : "Tank levels shown from last known values. Cost calculated from actual metered usage."}
+              {useSnap ? `Tank levels — last reading as of ${fmtSnapTime}. Cost calculated from actual tank drawdown.` : "Tank levels shown from last known values. Cost calculated from actual tank drawdown."}
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(280px, 1fr))", gap:16, marginBottom:24 }}>
               {tanks.map(t => {
@@ -1108,7 +1153,7 @@ function Dashboard({ userEmail, onLogout }) {
                 <div style={{ borderTop:"2px solid rgba(34,211,238,0.15)", marginTop:4, paddingTop:12, display:"flex", justifyContent:"space-between", alignItems:"flex-end" }}>
                   <div>
                     <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>{today.bbl.toLocaleString()} bbl treated</div>
-                    <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)", marginTop:2 }}>${costPerBbl.toFixed(4)} /bbl</div>
+                    <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)", marginTop:2 }}>{costPerBbl != null ? `$${costPerBbl.toFixed(4)} /bbl` : "$/bbl — pending treated volume"}</div>
                   </div>
                   <div style={{ fontSize:28, fontWeight:700, color:"#22d3ee", fontFamily:"'JetBrains Mono',monospace" }}>${totalCost.toFixed(2)}</div>
                 </div>
@@ -1120,10 +1165,10 @@ function Dashboard({ userEmail, onLogout }) {
                   <span style={{color:"#a78bfa"}}><Icon type="chart" size={16}/></span>
                   <span style={{ fontSize:12, fontWeight:600, color:"rgba(255,255,255,0.5)", letterSpacing:1.5, textTransform:"uppercase" }}>7-Day Cost Trend</span>
                 </div>
-                <CostChart data={DAILY_USAGE}/>
+                <CostChart data={usage}/>
                 <div style={{ borderTop:"1px solid rgba(255,255,255,0.06)", marginTop:16, paddingTop:12, display:"flex", justifyContent:"space-between" }}>
                   <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>
-                    {weekTotals.bbl.toLocaleString()} bbl total · ${(weekCost/weekTotals.bbl).toFixed(4)}/bbl avg
+                    {weekTotals.bbl.toLocaleString()} bbl total{weekTotals.bbl > 0 ? ` · $${(weekCost/weekTotals.bbl).toFixed(4)}/bbl avg` : ""}{usageReal ? "" : " · placeholder until history accrues"}
                   </div>
                   <div style={{ fontSize:14, fontWeight:600, color:"#a78bfa", fontFamily:"'JetBrains Mono',monospace" }}>
                     ${weekCost.toFixed(2)} <span style={{ fontSize:11, color:"rgba(255,255,255,0.3)", fontWeight:400 }}>7-day total</span>
