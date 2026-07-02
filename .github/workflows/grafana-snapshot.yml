@@ -35,6 +35,7 @@ jobs:
           GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
           GRAFANA_PASS: ${{ secrets.GRAFANA_PASS }}
           GRAFANA_BASE: https://gkoilfield.grafana.net
+          SNAPSHOT_MODE: targeted
           DASH_PATHS: /d/tasp46j/supreme-on-the-fly-water-treatment,/d/tan2hlz/supreme-on-the-fly-tank-levels
         run: node scripts/grafana-snapshot.mjs
 

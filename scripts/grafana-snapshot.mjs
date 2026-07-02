@@ -1,28 +1,48 @@
 // scripts/grafana-snapshot.mjs
 //
-// Pulls a 24h snapshot from GK Grafana WITHOUT a service-account token.
-// It logs in like a normal user with a headless browser, then reads the
-// same /api/ds/query responses the dashboard itself makes, and rolls them
-// up into data/live_snapshot.json for the app to display.
+// Pulls a 24h snapshot from GK Grafana WITHOUT a service-account token,
+// using John's viewer login. Two modes:
 //
-// The first run is also a DISCOVERY run: it writes data/grafana-discovery.json
-// with the raw captured queries so we can see the exact field names and query
-// format coming back, then refine the per-field math.
+//   SNAPSHOT_MODE=targeted (default)
+//     Logs in over plain HTTP (Playwright fallback if that fails), then runs
+//     a small set of our own InfluxQL queries through Grafana's
+//     /api/ds/query proxy: server-side GROUP BY time(1h) aggregation, ~8
+//     HTTP requests per run, explicit logout. Lighter on GK's stack than a
+//     person watching the dashboard with auto-refresh on.
+//
+//   SNAPSHOT_MODE=discovery
+//     Headless-browser capture of both dashboards' own panel queries.
+//     Used to re-learn the schema when GK changes things.
+//
+// Schema (confirmed from the 2026-07-01 discovery run, Bankhead layout):
+//   measurement "Double Eagle", tag Location in {Inlet, Outlet,
+//   Flowmeter 1..2, Pump 1..6, Tank}; tanks disambiguated by Well tag
+//   (SI-211, TQ-20). Fields: ORP, pH, Pump Rate, Fluid Volume,
+//   Fluid Percentage, Conductivity, TDS, Chlorides, Dissolved Oxygen,
+//   Corrosion, Specific Gravity, LSI, Stiff and Davis, H2S, Temperature.
 //
 // Env (set by the GitHub Actions workflow):
-//   GRAFANA_USER, GRAFANA_PASS  - your Grafana login (from repo secrets)
+//   GRAFANA_USER, GRAFANA_PASS  - viewer login (from repo secrets)
 //   GRAFANA_BASE                - https://gkoilfield.grafana.net
-//   DASH_PATHS                  - comma-separated dashboard paths to capture.
-//                                 Template vars are NOT forced; each dashboard
-//                                 loads with its saved defaults (Bankhead).
+//   DS_UID                      - InfluxDB datasource uid
+//   SNAPSHOT_MODE               - targeted | discovery
+//   DASH_PATHS                  - discovery mode: comma-separated dashboards
+//
+// Outputs (data/ is gitignored; artifact + Supabase only, never the repo):
+//   data/live_snapshot.json     - clean rolled-up series for the app
+//   data/targeted-raw.json      - raw query responses (debug, private)
+//   data/grafana-discovery.json - discovery mode only
+//
+// Exit codes: 1 bad env, 2 login form problem, 3 login failed,
+//             4 no data captured.
 
-import { chromium } from 'playwright';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
 const BASE = (process.env.GRAFANA_BASE || 'https://gkoilfield.grafana.net').replace(/\/$/, '');
-const DASH_PATH = process.env.DASH_PATH || '/d/tasp46j/supreme-on-the-fly-water-treatment';
-const DASH_PATHS = (process.env.DASH_PATHS || DASH_PATH).split(',').map((s) => s.trim()).filter(Boolean);
-const PAD = process.env.PAD || '';
+const MODE = (process.env.SNAPSHOT_MODE || 'targeted').toLowerCase();
+const DS_UID = process.env.DS_UID || 'c22413e3-e707-4321-bf14-85623533c02e';
+const DASH_PATHS = (process.env.DASH_PATHS || '/d/tasp46j/supreme-on-the-fly-water-treatment,/d/tan2hlz/supreme-on-the-fly-tank-levels')
+  .split(',').map((s) => s.trim()).filter(Boolean);
 const USER = process.env.GRAFANA_USER;
 const PASS = process.env.GRAFANA_PASS;
 
@@ -31,222 +51,258 @@ if (!USER || !PASS) {
   process.exit(1);
 }
 
-const captured = [];
+mkdirSync('data', { recursive: true });
 
-function pickField(fields, pred) {
-  for (let i = 0; i < fields.length; i++) if (pred(fields[i], i)) return i;
-  return -1;
-}
+// ---------------------------------------------------------------------------
+// Rollup helpers (no spread on large arrays; loop-based min/max)
 
-function hourlyBuckets(points) {
-  const map = new Map();
+function rollup(points) {
+  let min = Infinity, max = -Infinity, sum = 0, n = 0, latest = null, latestAt = null;
   for (const p of points) {
-    if (p.t == null || p.v == null) continue;
-    const h = Math.floor(p.t / 3600000) * 3600000;
-    if (!map.has(h)) map.set(h, []);
-    map.get(h).push(p.v);
+    if (p.v == null) continue;
+    if (p.v < min) min = p.v;
+    if (p.v > max) max = p.v;
+    sum += p.v; n++;
+    if (latestAt == null || (p.t != null && p.t >= latestAt)) { latest = p.v; latestAt = p.t; }
   }
-  return [...map.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([h, vs]) => ({ hour: new Date(h).toISOString(), avg: vs.reduce((a, b) => a + b, 0) / vs.length }))
-    .slice(-24);
+  if (!n) return null;
+  return { latest, latestAt: latestAt != null ? new Date(latestAt).toISOString() : null, mean24h: sum / n, min, max, count: n };
 }
 
-function extractSeries(caps) {
+function seriesFromFrames(frames, fallbackName) {
+  const out = [];
+  for (const f of frames || []) {
+    const fields = f.schema?.fields || [];
+    const values = f.data?.values || [];
+    if (!fields.length || !values.length) continue;
+    const tIdx = fields.findIndex((fl) => fl.type === 'time');
+    for (let i = 0; i < fields.length; i++) {
+      if (i === tIdx || fields[i].type !== 'number') continue;
+      const labels = fields[i].labels || {};
+      const fieldName = fields[i].config?.displayNameFromDS || fields[i].name || fallbackName;
+      const pts = [];
+      const times = tIdx >= 0 ? values[tIdx] || [] : [];
+      for (let j = 0; j < (values[i] || []).length; j++) {
+        pts.push({ t: times[j] ?? null, v: values[i][j] });
+      }
+      const hourly = [];
+      for (const p of pts) {
+        if (p.t == null || p.v == null) continue;
+        const iso = new Date(Math.floor(p.t / 3600000) * 3600000).toISOString();
+        const last = hourly[hourly.length - 1];
+        if (last && last.hour === iso) { last.sum += p.v; last.n++; }
+        else hourly.push({ hour: iso, sum: p.v, n: 1 });
+      }
+      const r = rollup(pts);
+      if (!r) continue;
+      out.push({
+        fieldName,
+        tags: { location: labels.Location || null, well: labels.Well || null, pad: labels.Pad || null },
+        ...r,
+        hourly: hourly.slice(-24).map((h) => ({ hour: h.hour, avg: h.sum / h.n })),
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Login: plain HTTP first, headless browser as fallback. Never logs values.
+
+let cookieHeader = null;
+let browser = null;
+
+async function loginPlain() {
+  const res = await fetch(`${BASE}/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user: USER, password: PASS }),
+    redirect: 'manual',
+  });
+  const cookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+  const session = cookies.map((c) => c.split(';')[0]).filter((c) => /grafana_session/i.test(c));
+  if (!res.ok || !session.length) {
+    console.error(`Plain HTTP login not accepted (status ${res.status}); will try browser fallback.`);
+    return false;
+  }
+  cookieHeader = cookies.map((c) => c.split(';')[0]).join('; ');
+  console.log('Plain HTTP login OK.');
+  return true;
+}
+
+async function loginBrowser() {
+  const { chromium } = await import('playwright');
+  browser = await chromium.launch();
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1200 } });
+  const page = await ctx.newPage();
+  await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  const userSelectors = [
+    'input[name="user"]', 'input[name="login"]', 'input[name="email"]',
+    'input[autocomplete="username"]', 'input[data-testid="data-testid Username input field"]',
+    'input[aria-label="Username input field"]', 'input[type="email"]', 'input[type="text"]',
+  ];
+  const passSelectors = [
+    'input[name="password"]', 'input[type="password"]',
+    'input[autocomplete="current-password"]', 'input[data-testid="data-testid Password input field"]',
+  ];
+  const appeared = await page.waitForSelector([...userSelectors, ...passSelectors].join(', '), { timeout: 30000 })
+    .then(() => true).catch(() => false);
+  if (!appeared) {
+    console.error(`Login form never rendered at ${page.url()} (title: "${await page.title()}").`);
+    process.exit(2);
+  }
+  const fillFirst = async (sels, val) => {
+    for (const sel of sels) {
+      const el = await page.$(sel);
+      if (el && (await el.isVisible().catch(() => false))) { await el.fill(val); return sel; }
+    }
+    return null;
+  };
+  const u = await fillFirst(userSelectors, USER);
+  const p = await fillFirst(passSelectors, PASS);
+  if (!u || !p) { console.error('Could not fill login fields.'); process.exit(2); }
+  for (const sel of ['button[type="submit"]', 'button:has-text("Log in")', 'button:has-text("Login")', 'button:has-text("Sign in")']) {
+    const b = await page.$(sel);
+    if (b) { await b.click(); break; }
+  }
+  await page.waitForLoadState('networkidle').catch(() => {});
+  try { const skip = await page.$('button:has-text("Skip")'); if (skip) await skip.click(); } catch {}
+  await page.waitForTimeout(2000);
+  if (page.url().includes('/login')) { console.error('LOGIN FAILED: still on /login after submit.'); await browser.close(); process.exit(3); }
+  const cookies = await ctx.cookies(BASE);
+  cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+  console.log('Browser login OK.');
+  return page;
+}
+
+async function logout() {
+  try { await fetch(`${BASE}/logout`, { headers: { Cookie: cookieHeader }, redirect: 'manual' }); } catch {}
+  if (browser) { try { await browser.close(); } catch {} }
+}
+
+// ---------------------------------------------------------------------------
+// Targeted mode
+
+const M = '"Double Eagle"';
+const T24 = 'time > now() - 24h';
+const G1H = 'GROUP BY time(1h)';
+const TARGETS = [
+  { refId: 'orp',   label: 'ORP',        sql: `SELECT MEAN("ORP") FROM ${M} WHERE "Location"::tag =~ /^(Inlet|Outlet)$/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
+  { refId: 'ph',    label: 'pH',         sql: `SELECT MEAN("pH") FROM ${M} WHERE "Location"::tag =~ /^(Inlet|Outlet)$/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
+  { refId: 'flow',  label: 'Flow Rate',  sql: `SELECT MEAN("Pump Rate") FROM ${M} WHERE "Location"::tag =~ /^Flowmeter/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
+  { refId: 'pumps', label: 'Pump Rate',  sql: `SELECT MEAN("Pump Rate") FROM ${M} WHERE "Location"::tag =~ /^Pump [0-9]/ AND ${T24} ${G1H}, "Location"::tag fill(null)` },
+  { refId: 'tanks', label: 'Tank',       sql: `SELECT MEAN("Fluid Volume") AS "Fluid Volume", MEAN("Fluid Percentage") AS "Fluid Percentage" FROM ${M} WHERE "Location"::tag = 'Tank' AND ${T24} ${G1H}, "Well"::tag fill(null)` },
+  { refId: 'chem',  label: 'Chemistry',  sql: `SELECT MEAN("Conductivity") AS "Conductivity", MEAN("TDS") AS "TDS", MEAN("Chlorides") AS "Chlorides", MEAN("Dissolved Oxygen") AS "Dissolved Oxygen", MEAN("Corrosion") AS "Corrosion", MEAN("Specific Gravity") AS "Specific Gravity", MEAN("LSI") AS "LSI", MEAN("Stiff and Davis") AS "Stiff and Davis", MEAN("H2S") AS "H2S", MEAN("Temperature") AS "Temperature" FROM ${M} WHERE ${T24} ${G1H} fill(null)` },
+];
+
+async function runTargeted() {
+  const raw = [];
   const series = [];
-  for (const c of caps) {
-    const results = (c.response && c.response.results) || {};
-    for (const ref of Object.keys(results)) {
-      const frames = results[ref].frames || [];
-      for (const f of frames) {
-        const fields = (f.schema && f.schema.fields) || [];
-        const values = (f.data && f.data.values) || [];
-        if (!fields.length || !values.length) continue;
-        const tIdx = pickField(fields, (fl) => fl.type === 'time' || /time/i.test(fl.name || ''));
-        const vIdx = pickField(fields, (fl, i) => i !== tIdx && fl.type === 'number');
-        if (vIdx < 0) continue;
-        const name =
-          (fields[vIdx].config && fields[vIdx].config.displayNameFromDS) ||
-          fields[vIdx].name ||
-          (f.schema && f.schema.name) ||
-          ref;
-        const times = tIdx >= 0 ? values[tIdx] || [] : [];
-        const vals = values[vIdx] || [];
-        const points = [];
-        for (let i = 0; i < vals.length; i++) {
-          if (vals[i] == null) continue;
-          points.push({ t: times[i] != null ? times[i] : null, v: vals[i] });
-        }
-        if (!points.length) continue;
-        const nums = points.map((p) => p.v);
-        series.push({
-          name,
-          latest: nums[nums.length - 1],
-          mean24h: nums.reduce((a, b) => a + b, 0) / nums.length,
-          min: Math.min(...nums),
-          max: Math.max(...nums),
-          count: nums.length,
-          hourly: hourlyBuckets(points)
-        });
+  for (const t of TARGETS) {
+    const body = {
+      from: 'now-24h', to: 'now',
+      queries: [{
+        refId: t.refId,
+        datasource: { type: 'influxdb', uid: DS_UID },
+        query: t.sql, rawQuery: true, resultFormat: 'time_series',
+        maxDataPoints: 30, intervalMs: 3600000,
+      }],
+    };
+    let ok = false, json = null, status = 0;
+    try {
+      const res = await fetch(`${BASE}/api/ds/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookieHeader, 'X-Grafana-Org-Id': '1' },
+        body: JSON.stringify(body),
+      });
+      status = res.status;
+      json = await res.json().catch(() => null);
+      ok = res.ok && json?.results;
+    } catch (e) {
+      console.error(`query ${t.refId} failed: ${String(e).slice(0, 120)}`);
+    }
+    raw.push({ refId: t.refId, status, response: json });
+    if (!ok) { console.error(`query ${t.refId}: HTTP ${status}, skipping`); continue; }
+    for (const ref of Object.keys(json.results)) {
+      const extracted = seriesFromFrames(json.results[ref].frames, t.label);
+      for (const s of extracted) {
+        const tagPart = s.tags.well || s.tags.location;
+        const label = tagPart ? `${s.fieldName} @ ${tagPart}` : s.fieldName;
+        const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        series.push({ key, label, group: t.refId, field: s.fieldName, tags: s.tags,
+          latest: s.latest, latestAt: s.latestAt, mean24h: s.mean24h, min: s.min, max: s.max,
+          count: s.count, hourly: s.hourly });
       }
     }
   }
-  return series;
+  return { raw, series };
 }
 
-const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1600, height: 1200 } });
-const page = await ctx.newPage();
+// ---------------------------------------------------------------------------
+// Discovery mode (headless capture of the dashboards' own queries)
 
-page.on('response', async (res) => {
-  if (!res.url().includes('/api/ds/query')) return;
-  try {
-    const json = await res.json();
-    let request = null;
-    try { request = JSON.parse(res.request().postData() || 'null'); } catch {}
-    captured.push({ url: res.url(), status: res.status(), pageUrl: page.url(), request, response: json });
-  } catch {}
-});
-
-// Always-on login diagnostics: a failed login should still leave evidence in
-// the artifact (page structure + screenshot), never an empty one. Captures
-// element attributes only, blanks password fields first, never field values.
-async function writeLoginDiagnostics(tag) {
-  try {
-    mkdirSync('data', { recursive: true });
-    await page.evaluate(() => {
-      document.querySelectorAll('input[type="password"]').forEach((i) => { i.value = ''; });
-    }).catch(() => {});
-    const inventory = await page.evaluate(() => {
-      const grab = (els) => [...els].map((e) => ({
-        tag: e.tagName.toLowerCase(),
-        type: e.getAttribute('type'),
-        name: e.getAttribute('name'),
-        id: e.getAttribute('id'),
-        placeholder: e.getAttribute('placeholder'),
-        autocomplete: e.getAttribute('autocomplete'),
-        ariaLabel: e.getAttribute('aria-label'),
-        testid: e.getAttribute('data-testid'),
-        text: (e.innerText || '').trim().slice(0, 40),
-      }));
-      return {
-        url: location.href,
-        title: document.title,
-        inputs: grab(document.querySelectorAll('input')),
-        buttons: grab(document.querySelectorAll('button')),
-        links: grab(document.querySelectorAll('a')).slice(0, 30),
-      };
-    }).catch((e) => ({ error: String(e) }));
-    writeFileSync('data/login-debug.json', JSON.stringify({ tag, generatedAt: new Date().toISOString(), inventory }, null, 2));
-    await page.screenshot({ path: 'data/login-debug.png', fullPage: true }).catch(() => {});
-    try { writeFileSync('data/login-debug.html', await page.content()); } catch {}
-  } catch (e) {
-    console.error('login diagnostics failed:', String(e));
+async function runDiscovery() {
+  const { chromium } = await import('playwright');
+  if (!browser) browser = await chromium.launch();
+  const ctx = await browser.newContext({
+    viewport: { width: 1600, height: 1200 },
+    extraHTTPHeaders: cookieHeader ? { Cookie: cookieHeader } : {},
+  });
+  const page = await ctx.newPage();
+  const captured = [];
+  const pending = new Set();
+  page.on('response', (res) => {
+    if (!res.url().includes('/api/ds/query')) return;
+    const p = (async () => {
+      try {
+        const json = await res.json();
+        let request = null;
+        try { request = JSON.parse(res.request().postData() || 'null'); } catch {}
+        captured.push({ url: res.url(), status: res.status(), pageUrl: page.url(), request, response: json });
+      } catch {}
+    })();
+    pending.add(p); p.finally(() => pending.delete(p));
+  });
+  const dashUrls = [];
+  for (const dp of DASH_PATHS) {
+    const sep = dp.includes('?') ? '&' : '?';
+    const u = `${BASE}${dp}${sep}orgId=1&from=now-24h&to=now`;
+    dashUrls.push(u);
+    await page.goto(u, { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {});
+    for (let y = 0; y < 4; y++) { await page.mouse.wheel(0, 1200); await page.waitForTimeout(1500); }
+    await page.waitForTimeout(4000);
   }
+  await Promise.allSettled([...pending]);
+  writeFileSync('data/grafana-discovery.json',
+    JSON.stringify({ generatedAt: new Date().toISOString(), dashUrls, queryCount: captured.length, captured }, null, 2));
+  console.log(`discovery: captured ${captured.length} panel queries.`);
+  return captured.length;
 }
 
-// 1) Log in
-await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+// ---------------------------------------------------------------------------
+// Main
 
-const userSelectors = [
-  'input[name="user"]', 'input[name="login"]', 'input[name="email"]',
-  'input[autocomplete="username"]', 'input[data-testid="data-testid Username input field"]',
-  'input[aria-label="Username input field"]', 'input[type="email"]', 'input[type="text"]',
-];
-const passSelectors = [
-  'input[name="password"]', 'input[type="password"]',
-  'input[autocomplete="current-password"]', 'input[data-testid="data-testid Password input field"]',
-];
+const plainOk = await loginPlain();
+if (!plainOk) await loginBrowser();
 
-// Grafana's login form is client-rendered, so domcontentloaded fires before
-// the inputs mount. Wait for the form to appear before filling it.
-const formAppeared = await page
-  .waitForSelector([...userSelectors, ...passSelectors].join(', '), { timeout: 30000 })
-  .then(() => true)
-  .catch(() => false);
-if (!formAppeared) {
-  console.error(`Login form never rendered at ${page.url()} (title: "${await page.title()}").`);
-  console.error('Wrote data/login-debug.* for inspection. The page may use SSO or a different form.');
-  await writeLoginDiagnostics('form-never-rendered');
-  await browser.close();
-  process.exit(2);
+let seriesCount = 0;
+if (MODE === 'discovery') {
+  const n = await runDiscovery();
+  await logout();
+  if (n === 0) { console.error('No panel queries captured.'); process.exit(4); }
+} else {
+  const { raw, series } = await runTargeted();
+  await logout();
+  writeFileSync('data/targeted-raw.json', JSON.stringify({ generatedAt: new Date().toISOString(), raw }, null, 2));
+  writeFileSync('data/live_snapshot.json', JSON.stringify({
+    updatedAt: new Date().toISOString(),
+    source: 'gk-grafana-targeted',
+    window: '24h', interval: '1h',
+    pad: 'BANKHEAD',
+    seriesCount: series.length,
+    series,
+  }, null, 2));
+  seriesCount = series.length;
+  if (!seriesCount) { console.error('No series extracted — check queries/schema.'); process.exit(4); }
+  console.log(`OK: ${seriesCount} series rolled up from ${TARGETS.length} targeted queries.`);
 }
-
-async function fillFirst(selectors, value) {
-  for (const sel of selectors) {
-    const el = await page.$(sel);
-    if (el && (await el.isVisible().catch(() => false))) { await el.fill(value); return sel; }
-  }
-  return null;
-}
-
-const userSel = await fillFirst(userSelectors, USER);
-const passSel = await fillFirst(passSelectors, PASS);
-if (!userSel || !passSel) {
-  console.error(`Could not fill login fields at ${page.url()} (title: "${await page.title()}"). userSel=${userSel} passSel=${passSel}`);
-  console.error('Wrote data/login-debug.* with the input inventory so selectors can be corrected.');
-  await writeLoginDiagnostics('fields-not-fillable');
-  await browser.close();
-  process.exit(2);
-}
-
-for (const sel of ['button[type="submit"]', 'button[data-testid="data-testid Login button"]', 'button:has-text("Log in")', 'button:has-text("Login")', 'button:has-text("Sign in")']) {
-  const b = await page.$(sel);
-  if (b) { await b.click(); break; }
-}
-await page.waitForLoadState('networkidle').catch(() => {});
-
-// Grafana may show a change-password step with a "Skip" button
-try { const skip = await page.$('button:has-text("Skip")'); if (skip) await skip.click(); } catch {}
-await page.waitForTimeout(2000);
-const loggedIn = !page.url().includes('/login');
-if (!loggedIn) { await writeLoginDiagnostics('login-failed-after-submit'); }
-
-// 2) Open each dashboard for the last 24h so its panels run their queries.
-// Template vars are not forced; dashboards load with their saved defaults
-// (Bankhead / Double Eagle per GK's July 2026 layout).
-const dashUrls = [];
-for (const dp of DASH_PATHS) {
-  const sep = dp.includes('?') ? '&' : '?';
-  let dashUrl = `${BASE}${dp}${sep}orgId=1&from=now-24h&to=now`;
-  if (PAD) dashUrl += `&var-Pad=${encodeURIComponent(PAD)}`;
-  dashUrls.push(dashUrl);
-  await page.goto(dashUrl, { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {});
-
-  // nudge lazy-loaded panels into view
-  for (let y = 0; y < 4; y++) { await page.mouse.wheel(0, 1200); await page.waitForTimeout(1500); }
-  await page.waitForTimeout(4000);
-}
-
-// 3) Write outputs
-mkdirSync('data', { recursive: true });
-writeFileSync(
-  'data/grafana-discovery.json',
-  JSON.stringify({ generatedAt: new Date().toISOString(), dashUrls, loggedIn, queryCount: captured.length, captured }, null, 2)
-);
-
-const series = extractSeries(captured);
-writeFileSync(
-  'data/live_snapshot.json',
-  JSON.stringify(
-    {
-      updatedAt: new Date().toISOString(),
-      pad: PAD || null,
-      dashboards: DASH_PATHS,
-      source: 'GK Grafana, headless session scrape of /api/ds/query',
-      loggedIn,
-      queryCount: captured.length,
-      seriesCount: series.length,
-      series
-    },
-    null,
-    2
-  )
-);
-
-await browser.close();
-
-// 4) Fail loudly so a broken login never silently publishes empty tiles
-if (!loggedIn) { console.error('LOGIN FAILED: still on /login after submit.'); process.exit(3); }
-if (captured.length === 0) { console.error('No /api/ds/query captured. Check DASH_PATH and dashboard access.'); process.exit(4); }
-console.log(`OK: captured ${captured.length} queries, extracted ${series.length} series.`);

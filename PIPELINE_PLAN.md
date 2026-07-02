@@ -26,10 +26,14 @@ sensor data (hourly refresh), and the "Open in Grafana" button becomes
       /d/tasp46j/supreme-on-the-fly-water-treatment and
       /d/tan2hlz/supreme-on-the-fly-tank-levels with dashboard defaults
       (Bankhead), no var-Pad forcing.
-- [ ] Phase 0b: run discovery from this branch, confirm: production
-      measurement name (expect "Double Eagle", not "Double Eagle Demo"),
-      new template var names (var-Fleet, var-Source...), Flow Rate 1/2
-      field+location names, alert/Treatment Effect fields, tank fields.
+- [x] Phase 0b: DONE 2026-07-01 (run 28565326515). Confirmed: production
+      measurement "Double Eagle" (demo repointed); tag Location in {Inlet,
+      Outlet, Flowmeter 1..2, Pump 1..6, Tank}; tanks use Well tag (SI-211,
+      TQ-20); Flow Rate = field "Pump Rate" @ Flowmeter 1/2; fields
+      Fluid Volume / Fluid Percentage @ Location=Tank; chem fields unscoped;
+      Treatment Effect = Grafana expression (compute app-side); GK quirk:
+      their "Temperature" stat actually reads pH — we bypass with our own
+      queries. Datasource uid c22413e3-e707-4321-bf14-85623533c02e confirmed.
 - [ ] Phase 1: targeted InfluxQL queries replace passive panel capture
       (stable series naming: measurement/field/Location), min/max via reduce,
       no capture race, keep login diagnostics + fail-loud exits (2/3/4).
