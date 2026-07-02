@@ -59,28 +59,23 @@ const { useState, useEffect, useCallback } = React;
 /* ═══════════════════════════════════════════════
    AUTHENTICATION
    ─────────────────────────────────────────────
-   To add/change authorized users, edit the
-   AUTHORIZED_USERS list below. Passwords are
-   SHA-256 hashed for basic obfuscation.
-   
-   For production, replace with server-side auth.
+   Server-side: portal-login issues a revocable
+   session token checked by the data endpoints.
+   To add/change users, edit the portal_users
+   table in Supabase — nothing ships in this page.
    ═══════════════════════════════════════════════ */
-
-// Simple SHA-256 hash (built into browsers)
-async function hashPassword(pw) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+// ── Auth ──
+// Sign-in is server-side: the portal-login edge function checks credentials
+// against the portal_users table and returns a revocable session token.
+// No credential material ships in this page; user management happens in
+// Supabase (portal_users), not here.
+function portalSession() {
+  try {
+    const s = JSON.parse(sessionStorage.getItem("sct_auth"));
+    if (s && s.token && new Date(s.expires_at) > new Date()) return s;
+  } catch (e) {}
+  return null;
 }
-
-// ── Authorized users ──
-// To generate a hash for a new password, open browser console and run:
-//   crypto.subtle.digest("SHA-256", new TextEncoder().encode("yourpassword")).then(b => console.log(Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("")))
-const AUTHORIZED_USERS = [
-  { email: "jcoronado@depermian.com", passwordHash: "bb92cd1989af23aee379b57d0947fff1af299181fa825d9299c37bfe5565f12e" }, // DE2026!
-  { email: "jbrosig@deeh.com", passwordHash: "bb92cd1989af23aee379b57d0947fff1af299181fa825d9299c37bfe5565f12e" }, // DE2026!
-  { email: "jgriffin@depermian.com", passwordHash: "bb92cd1989af23aee379b57d0947fff1af299181fa825d9299c37bfe5565f12e" }, // DE2026!
-  { email: "tanhee@geokimika.com", passwordHash: "38129ebb89e55e26051772fa62160e6056336f54af904d6c0a6e849483afe5c8" }, // OTF2026!
-];
 
 const LoginScreen = ({ onLogin }) => {
   const [email, setEmail] = useState("");
@@ -94,19 +89,24 @@ const LoginScreen = ({ onLogin }) => {
     setError("");
     setLoading(true);
 
-    // Small delay for UX
-    await new Promise(r => setTimeout(r, 600));
-
-    const hash = await hashPassword(password);
-    const user = AUTHORIZED_USERS.find(
-      u => u.email.toLowerCase() === email.trim().toLowerCase() && u.passwordHash === hash
-    );
-
-    if (user) {
-      sessionStorage.setItem("sct_auth", JSON.stringify({ email: user.email, ts: Date.now() }));
-      onLogin(user.email);
-    } else {
-      setError("Invalid email or password. Contact SCT for access.");
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/portal-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.token) {
+        sessionStorage.setItem("sct_auth", JSON.stringify({
+          token: j.token, email: j.email, customer_code: j.customer_code, expires_at: j.expires_at,
+        }));
+        onLogin(j.email);
+      } else {
+        setError("Invalid email or password. Contact SCT for access.");
+        setLoading(false);
+      }
+    } catch (err) {
+      setError("Could not reach the sign-in service. Check your connection and try again.");
       setLoading(false);
     }
   };
@@ -239,75 +239,49 @@ const AppWithAuth = () => {
   const [authedUser, setAuthedUser] = useState(null);
 
   useEffect(() => {
-    // Check for existing session
-    try {
-      const session = JSON.parse(sessionStorage.getItem("sct_auth"));
-      if (session && session.email && (Date.now() - session.ts) < 8 * 60 * 60 * 1000) { // 8 hour session
-        setAuthedUser(session.email);
-      }
-    } catch(e) {}
+    // Restore a server-issued session if it has not expired
+    const s = portalSession();
+    if (s) setAuthedUser(s.email);
   }, []);
 
   if (!authedUser) {
     return <LoginScreen onLogin={setAuthedUser} />;
   }
 
-  return <Dashboard userEmail={authedUser} onLogout={() => { sessionStorage.removeItem("sct_auth"); setAuthedUser(null); }} />;
+  return <Dashboard userEmail={authedUser} onLogout={() => {
+    const s = portalSession();
+    if (s) {
+      fetch(`${SUPABASE_URL}/functions/v1/portal-logout`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${SUPABASE_ANON_KEY}`, "x-portal-session": s.token },
+      }).catch(() => {});
+    }
+    sessionStorage.removeItem("sct_auth");
+    setAuthedUser(null);
+  }} />;
 };
 
 /* ═══════════════════════════════════════════════
-   LIVE DATA CONFIG
+   LIVE DATA — 24-HR SNAPSHOT
    ───────────────────────────────────────────────
-   Backend: supreme-otf-api.vercel.app (InfluxQL proxy → GKOS Grafana/InfluxDB)
-   When telemetry measurement/field names are confirmed with GK, flip
-   USE_LIVE_DATA to true and fill in the field map below.
-   Each panel falls back to simulated data when USE_LIVE_DATA = false
-   or when the API call fails, so the dashboard always renders.
+   Sensor data comes from the live_snapshot Supabase table, refreshed hourly
+   by the grafana-snapshot GitHub Action (see PIPELINE_PLAN.md). The app
+   reads it through the session-gated snapshot-get edge function.
+   Series keys (confirmed against Bankhead production, July 2026):
+     orp_inlet, orp_outlet, ph_inlet, ph_outlet,
+     flow_rate_flowmeter_1 / _2 (bbl/min),
+     pump_rate_pump_1..6 (GPH; 1+2 = SI-211, 3+4 = TQ-20, 5+6 = H2O2),
+     fluid_volume_si_211, fluid_percentage_si_211,
+     fluid_volume_tq_20, fluid_percentage_tq_20,
+     conductivity, tds, chlorides, dissolved_oxygen, corrosion,
+     specific_gravity, lsi, stiff_and_davis, temperature.
+   Panels fall back to simulated data when no fresh snapshot is available;
+   the header badge always says which mode is showing.
    ═══════════════════════════════════════════════ */
-// Confirmed June 21, 2026 via GKOS Grafana Query Inspector. Two dashboards:
-//   Tank dashboard   /d/jopnxdw  — tags Pad/Well/Tank, fields Fluid Volume/Fluid Percentage/Pump Rate
-//   Sensor dashboard /d/tasp46j  — tag Location (Inlet/Outlet), fields ORP/pH/H2S/Conductivity/TDS/Chlorides
-// Both use the operator name as the InfluxDB measurement.
-// Production data will live under measurement "Double Eagle" once Bankhead pad
-// starts July 3, 2026. Demo data is under "Double Eagle Demo".
-const USE_LIVE_DATA = false; // flip to true once service-account token is in place
-const API_BASE = "https://supreme-otf-api.vercel.app";
-const MEASUREMENT = "Double Eagle"; // InfluxDB measurement for production data
-
-// Per-tank tag triplets. JD to confirm exact GKOS naming for Bankhead pad once
-// computers are assigned. Pad/Well/Tank values below are placeholders.
-const TANK_TAGS = {
-  tq20:  { Pad: "Bankhead", Well: "Yard", Tank: "TQ-20"  }, // placeholder — confirm with GK
-  si211: { Pad: "Bankhead", Well: "Yard", Tank: "SI-211" }, // placeholder — confirm with GK
-  h2o2:  { Pad: "Bankhead", Well: "Yard", Tank: "H2O2"   }, // placeholder — confirm with GK
-};
-
-// Sensor data is keyed by Location tag ('Inlet' / 'Outlet'), NOT by Pad/Well/Tank.
-// Tank data is keyed by Pad/Well/Tank, NOT by Location. Two different schemas
-// on the same measurement (the operator name).
-const FIELD_MAP = {
-  // ── Sensor fields (Live Dashboard tab) — CONFIRMED June 21, 2026 from /d/tasp46j ──
-  orp_inlet:    { measurement: MEASUREMENT, field: "ORP",          tags: { Location: "Inlet"  } },
-  orp_outlet:   { measurement: MEASUREMENT, field: "ORP",          tags: { Location: "Outlet" } },
-  ph_outlet:    { measurement: MEASUREMENT, field: "pH",           tags: { Location: "Outlet" } },
-  h2s_inlet:    { measurement: MEASUREMENT, field: "H2S",          tags: { Location: "Inlet"  } },
-  conductivity: { measurement: MEASUREMENT, field: "Conductivity", tags: null }, // unscoped (no Location filter on GKOS panel)
-  tds:          { measurement: MEASUREMENT, field: "TDS",          tags: null }, // unscoped
-  chlorides:    { measurement: MEASUREMENT, field: "Chlorides",    tags: null }, // unscoped
-  // ── Tank telemetry (Inventory & Cost tab) — field names CONFIRMED, tag values still pending ──
-  tq20:       { measurement: MEASUREMENT, field: "Fluid Volume",     tags: TANK_TAGS.tq20  },
-  si211:      { measurement: MEASUREMENT, field: "Fluid Volume",     tags: TANK_TAGS.si211 },
-  h2o2:       { measurement: MEASUREMENT, field: "Fluid Volume",     tags: TANK_TAGS.h2o2  },
-  tq20_pct:   { measurement: MEASUREMENT, field: "Fluid Percentage", tags: TANK_TAGS.tq20  },
-  si211_pct:  { measurement: MEASUREMENT, field: "Fluid Percentage", tags: TANK_TAGS.si211 },
-  h2o2_pct:   { measurement: MEASUREMENT, field: "Fluid Percentage", tags: TANK_TAGS.h2o2  },
-  tq20_rate:  { measurement: MEASUREMENT, field: "Pump Rate",        tags: TANK_TAGS.tq20  },
-  si211_rate: { measurement: MEASUREMENT, field: "Pump Rate",        tags: TANK_TAGS.si211 },
-  h2o2_rate:  { measurement: MEASUREMENT, field: "Pump Rate",        tags: TANK_TAGS.h2o2  },
-};
+const SNAPSHOT_STALE_HOURS = 2.5; // hourly cadence plus slack before "delayed"
 
 /* ═══════════════════════════════════════════════
-   DATA GENERATORS (used when USE_LIVE_DATA = false)
+   DATA GENERATORS (fallback when no fresh snapshot is available)
    ═══════════════════════════════════════════════ */
 const genORP = () => +(180 + Math.random()*80 - Math.random()*15).toFixed(1);
 const genPH  = () => +(6.7 + Math.random()*0.8).toFixed(2);
@@ -351,37 +325,60 @@ const INITIAL_TANKS = [
 ];
 
 /* ═══════════════════════════════════════════════
-   LIVE FETCH HELPER
-   Calls the supreme-otf-api proxy. Returns the most recent value for
-   a given measurement+field, or null on failure. The proxy is hardened
-   with allow-lists (fleet, measurement, field) and a dev-key gate.
+   SNAPSHOT FETCH HELPER
+   Pulls the latest 24h rollup through the session-gated snapshot-get
+   edge function. Returns { updatedAt, pad, byKey } or null.
    ═══════════════════════════════════════════════ */
-async function fetchLatest(channelKey) {
-  if (!USE_LIVE_DATA) return null;
-  const spec = FIELD_MAP[channelKey];
-  if (!spec) return null;
+async function fetchSnapshot() {
+  const sess = portalSession();
+  if (!sess) return null;
   try {
-    const r = await fetch(`${API_BASE}/api/grafana-query`, {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/snapshot-get`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      // Note: dev-key must be set on the server side; this fetch from the
-      // browser intentionally does not carry the dev-key (proxy will be updated
-      // to accept a referer-based gate from supreme-otf.com once we cut over).
-      body: JSON.stringify({
-        kind: "latest",
-        fleet: spec.measurement,
-        measurement: spec.measurement,
-        field: spec.field,
-        tags: spec.tags || undefined,
-      }),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        "x-portal-session": sess.token,
+      },
     });
-    if (!r.ok) return null;
-    const j = await r.json();
-    const v = j?.data?.results?.A?.frames?.[0]?.data?.values?.[1]?.[0];
-    return (typeof v === "number") ? v : null;
+    if (!res.ok) return null;
+    const j = await res.json();
+    const byKey = {};
+    (j.payload?.series || []).forEach(s => { byKey[s.key] = s; });
+    return { updatedAt: j.updated_at, pad: j.pad, byKey };
   } catch (e) {
-    console.warn("[live] fetch failed:", channelKey, e);
+    console.warn("[snapshot] fetch failed:", e);
     return null;
+  }
+}
+
+// 7-day usage history: daily tank drawdown + treated volume, computed
+// server-side from the retained hourly snapshots. Same session gating.
+async function fetchSnapshotHistory() {
+  const sess = portalSession();
+  if (!sess) return [];
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/snapshot-get`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        "x-portal-session": sess.token,
+      },
+      body: JSON.stringify({ action: "history" }),
+    });
+    if (!res.ok) return [];
+    const j = await res.json();
+    return (j.days || []).map(d => ({
+      date: String(d.date).slice(5).replace("-", "/"),
+      bbl: Math.round(d.bbl || 0),
+      tq20: +(d.tq20_gal || 0),
+      si211: +(d.si211_gal || 0),
+      h2o2: +(d.h2o2_gal || 0),
+    }));
+  } catch (e) {
+    console.warn("[history] fetch failed:", e);
+    return [];
   }
 }
 
@@ -399,6 +396,7 @@ async function fetchDocuments() {
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        "x-portal-session": portalSession()?.token || "",
       },
       body: JSON.stringify({ customer_code: CUSTOMER_CODE }),
     });
@@ -423,6 +421,7 @@ async function fetchReports() {
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        "x-portal-session": portalSession()?.token || "",
       },
       body: JSON.stringify({ action: "list", customer_code: CUSTOMER_CODE }),
     });
@@ -577,7 +576,7 @@ const Sparkline = ({ data, color="#22d3ee", height=48 }) => {
    ═══════════════════════════════════════════════ */
 const CostChart = ({ data }) => {
   const costs = data.map(d => d.tq20*8.95 + d.si211*3.00 + d.h2o2*2.15);
-  const maxCost = Math.max(...costs);
+  const maxCost = Math.max(...costs, 1); // floor avoids NaN heights on all-zero days
   return (
     <div style={{ display:"flex", alignItems:"flex-end", gap:8, height:100, padding:"0 4px" }}>
       {data.map((d,i) => {
@@ -664,6 +663,30 @@ function Dashboard({ userEmail, onLogout }) {
   const [docsLoading, setDocsLoading] = useState(true);
   const [docsError, setDocsError] = useState(null);
 
+  // 24-hr snapshot from Supabase (hourly pipeline). Refreshed every 5 min.
+  const [snap, setSnap] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => fetchSnapshot().then(s => { if (!cancelled && s) setSnap(s); });
+    load();
+    const iv = setInterval(load, 5 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, []);
+  const snapAgeHrs = snap ? (Date.now() - new Date(snap.updatedAt).getTime()) / 3600000 : Infinity;
+  const snapFresh = snapAgeHrs <= SNAPSHOT_STALE_HOURS;
+  const sv = (key) => (snap && snap.byKey[key]) || null;
+  const svLatest = (key) => { const s = sv(key); return s && typeof s.latest === "number" ? s.latest : null; };
+  const svMean = (key) => { const s = sv(key); return s && typeof s.mean24h === "number" ? s.mean24h : null; };
+  const pos = (v) => (v == null ? 0 : Math.max(0, v));
+
+  // 7-day usage history (real tank drawdown) for the Inventory cost trend
+  const [histDays, setHistDays] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchSnapshotHistory().then(d => { if (!cancelled && d.length) setHistDays(d); });
+    return () => { cancelled = true; };
+  }, []);
+
   // Initial load + refresh whenever Documents tab is opened.
   // Fetches docs + published reports in parallel and merges them into one list.
   useEffect(() => {
@@ -711,19 +734,62 @@ function Dashboard({ userEmail, onLogout }) {
     return () => clearInterval(iv);
   }, []);
 
+  // Usage series: real daily tank drawdown from the snapshot history once
+  // available (fills out to 7 days as history accrues); placeholder otherwise.
+  const usage = histDays.length ? histDays : DAILY_USAGE;
+  const usageReal = histDays.length > 0;
   // Today's cost
-  const today = DAILY_USAGE[DAILY_USAGE.length-1];
+  const today = usage[usage.length-1];
   const costTQ20  = today.tq20  * 8.95;
   const costSI211 = today.si211 * 3.00;
   const costH2O2  = today.h2o2  * 2.15;
   const totalCost = costTQ20 + costSI211 + costH2O2;
-  const costPerBbl = totalCost / today.bbl;
+  const costPerBbl = today.bbl > 0 ? totalCost / today.bbl : null;
 
   // 7-day totals
-  const weekTotals = DAILY_USAGE.reduce((acc,d) => ({
+  const weekTotals = usage.reduce((acc,d) => ({
     bbl: acc.bbl+d.bbl, tq20: acc.tq20+d.tq20, si211: acc.si211+d.si211, h2o2: acc.h2o2+d.h2o2
   }), {bbl:0,tq20:0,si211:0,h2o2:0});
   const weekCost = weekTotals.tq20*8.95 + weekTotals.si211*3.00 + weekTotals.h2o2*2.15;
+
+  // Snapshot-backed view of the dashboard numbers; falls back to the
+  // simulator per-field when the snapshot is missing or stale.
+  // The portal shows 24-HOUR AVERAGES by design — real-time readings live in
+  // Grafana behind the Live View button. Tanks are the exception (last reading).
+  const useSnap = snap != null && snapFresh;
+  const doseSI211 = pos(svMean("pump_rate_pump_1")) + pos(svMean("pump_rate_pump_2"));
+  const doseTQ20  = pos(svMean("pump_rate_pump_3")) + pos(svMean("pump_rate_pump_4"));
+  const doseH2O2  = pos(svMean("pump_rate_pump_5")) + pos(svMean("pump_rate_pump_6"));
+  const view = useSnap ? {
+    inletORP:  svMean("orp_inlet")  ?? data.inletORP,
+    outletORP: svMean("orp_outlet") ?? data.outletORP,
+    inletPH:   svMean("ph_inlet")   ?? data.inletPH,
+    outletPH:  svMean("ph_outlet")  ?? data.outletPH,
+    flowRate:  pos(svMean("flow_rate_flowmeter_1")) + pos(svMean("flow_rate_flowmeter_2")),
+    tds: svMean("tds") ?? data.tds,
+    statics: {
+      chlorides:    svMean("chlorides")        ?? data.statics.chlorides,
+      conductivity: svMean("conductivity")     ?? data.statics.conductivity,
+      temperature:  svMean("temperature")      ?? data.statics.temperature,
+      do:           svMean("dissolved_oxygen") ?? data.statics.do,
+      cr:           svMean("corrosion")        ?? data.statics.cr,
+      sg:           svMean("specific_gravity") ?? data.statics.sg,
+      lsi:          svMean("lsi")              ?? data.statics.lsi,
+      stiffDavis:   svMean("stiff_and_davis")  ?? data.statics.stiffDavis,
+    },
+    dose: { tq20: doseTQ20, si211: doseSI211, h2o2: doseH2O2 },
+    h2o2Active: (svMean("orp_inlet") ?? 0) < 0 && doseH2O2 > 0.5,
+    orpHistory: (sv("orp_outlet")?.hourly?.length
+      ? sv("orp_outlet").hourly.map((h, i) => ({ t: i, v: h.avg }))
+      : data.orpHistory),
+  } : data;
+  // Header badge: fresh snapshot / delayed snapshot / simulated
+  const fmtSnapTime = snap ? new Date(snap.updatedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
+  const badge = useSnap
+    ? { color: "#22c55e", text: `24-HR AVERAGE · AS OF ${fmtSnapTime}` }
+    : snap
+    ? { color: "#f59e0b", text: `DATA DELAYED · LAST ${fmtSnapTime}` }
+    : { color: "#94a3b8", text: "SIMULATED · SNAPSHOT PENDING" };
 
   const filteredDocs = docFilter==="All" ? docs : docs.filter(d => d.category===docFilter);
 
@@ -763,8 +829,8 @@ function Dashboard({ userEmail, onLogout }) {
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:20 }}>
             <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-              <div style={{ width:7, height:7, borderRadius:"50%", background:"#22c55e", boxShadow:"0 0 8px #22c55e88" }}/>
-              <span style={{ fontSize:11, color:"#22c55e", fontWeight:600, letterSpacing:0.5 }}>LIVE</span>
+              <div style={{ width:7, height:7, borderRadius:"50%", background:badge.color, boxShadow:`0 0 8px ${badge.color}88` }}/>
+              <span style={{ fontSize:11, color:badge.color, fontWeight:600, letterSpacing:0.5 }}>{badge.text}</span>
             </div>
             <span style={{ fontSize:12, color:"rgba(255,255,255,0.4)", fontFamily:"'JetBrains Mono',monospace" }}>
               {time.toLocaleTimeString("en-US",{hour12:true})}
@@ -796,6 +862,13 @@ function Dashboard({ userEmail, onLogout }) {
 
         {/* ═══════ DASHBOARD ═══════ */}
         {activeTab==="dashboard" && (() => {
+          // Tiles below read the snapshot-backed view (per-field simulator
+          // fallback happens inside view's construction above).
+          const data = view;
+          // ppm from real flow: GPH dose vs (bbl/min x 42 gal/bbl x 60 min).
+          // Hidden while flow is zero (job idle) rather than dividing by a
+          // hardcoded plant capacity.
+          const ppmOf = (gph) => { const galHr = view.flowRate * 42 * 60; return galHr > 0 ? (gph / galHr) * 1e6 : null; };
           // Section header style helper
           const sectionHeader = (label, subtitle, accent) => (
             <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:12, paddingBottom:8, borderBottom:`1px solid ${accent}33` }}>
@@ -828,7 +901,7 @@ function Dashboard({ userEmail, onLogout }) {
           );
           return (
           <div className="fade-in">
-            {/* Open in Grafana button — deep links to the upstream OTF sensor dashboard */}
+            {/* Live View button — deep links to the real-time upstream Grafana dashboard */}
             <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:12 }}>
               <a
                 href="https://gkoilfield.grafana.net/d/tasp46j/supreme-on-the-fly-water-treatment"
@@ -845,10 +918,10 @@ function Dashboard({ userEmail, onLogout }) {
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "linear-gradient(135deg, rgba(251,191,36,0.22), rgba(251,146,60,0.18))"; e.currentTarget.style.borderColor = "rgba(251,191,36,0.55)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "linear-gradient(135deg, rgba(251,191,36,0.12), rgba(251,146,60,0.10))"; e.currentTarget.style.borderColor = "rgba(251,191,36,0.3)"; }}
-                title="Open the live Grafana dashboard in a new tab"
+                title="Open the real-time Grafana dashboard in a new tab"
               >
                 <Icon type="activity" size={14}/>
-                Open in Grafana
+                Live View
                 <Icon type="external-link" size={12}/>
               </a>
             </div>
@@ -876,7 +949,7 @@ function Dashboard({ userEmail, onLogout }) {
 
             {/* ═══ GROUP 1: CONTROL LOOP ═══ */}
             <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(34,211,238,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
-              {sectionHeader("Control Loop", "Inputs drive treatment · Outputs prove it worked", "#22d3ee")}
+              {sectionHeader("Control Loop", useSnap ? "24-hr averages · real-time in Live View" : "Inputs drive treatment · Outputs prove it worked", "#22d3ee")}
               {/* Inlet vs Outlet table */}
               <div style={{ display:"grid", gridTemplateColumns:"1.4fr 1fr 1fr 1fr", gap:0, alignItems:"center", marginBottom:14 }}>
                 {/* Header row */}
@@ -925,10 +998,10 @@ function Dashboard({ userEmail, onLogout }) {
               {/* Outlet ORP Trend */}
               <div style={{ marginTop:8, paddingTop:14, borderTop:"1px solid rgba(255,255,255,0.06)" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-                  <span style={{ fontSize:11, color:"rgba(255,255,255,0.45)", letterSpacing:1, textTransform:"uppercase", fontWeight:600 }}>Outlet ORP Trend — Last 40 readings</span>
+                  <span style={{ fontSize:11, color:"rgba(255,255,255,0.45)", letterSpacing:1, textTransform:"uppercase", fontWeight:600 }}>{useSnap ? "Outlet ORP Trend — hourly · last 24h" : "Outlet ORP Trend — Last 40 readings"}</span>
                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                     <div style={{ width:6, height:6, borderRadius:"50%", background:"#22d3ee", animation:"pulse 2s infinite" }}/>
-                    <span style={{ fontSize:10, color:"rgba(255,255,255,0.3)" }}>Live · 3s</span>
+                    <span style={{ fontSize:10, color:"rgba(255,255,255,0.3)" }}>{useSnap ? "Hourly snapshot" : "Simulated · 3s"}</span>
                   </div>
                 </div>
                 <Sparkline data={data.orpHistory} color="#22d3ee" height={70}/>
@@ -937,7 +1010,7 @@ function Dashboard({ userEmail, onLogout }) {
 
             {/* ═══ GROUP 2: WATER CHEMISTRY ═══ */}
             <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(167,139,250,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
-              {sectionHeader("Water Chemistry", "Static water profile · single reading sufficient", "#a78bfa")}
+              {sectionHeader("Water Chemistry", useSnap ? "24-hr averages" : "Static water profile · single reading sufficient", "#a78bfa")}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:18 }}>
                 {[
                   ["TDS",            data.tds.toLocaleString(),                "mg/L"],
@@ -962,7 +1035,7 @@ function Dashboard({ userEmail, onLogout }) {
 
             {/* ═══ GROUP 3: CHEMICAL DOSING ═══ */}
             <div style={{ background:"rgba(15,23,42,0.7)", border:"1px solid rgba(34,197,94,0.12)", borderRadius:12, padding:"20px 24px", marginBottom:16, backdropFilter:"blur(10px)" }}>
-              {sectionHeader("Chemical Dosing", "Live pump injection rates", "#22c55e")}
+              {sectionHeader("Chemical Dosing", useSnap ? "24-hr average injection rates" : "Pump injection rates", "#22c55e")}
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:16 }}>
                 {/* TQ-20 — metered via 'Corrosion' raw field @ Inlet */}
                 <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(34,197,94,0.15)" }}>
@@ -977,9 +1050,9 @@ function Dashboard({ userEmail, onLogout }) {
                     {data.dose.tq20.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>GPH</span>
                   </div>
                   <div style={{ fontSize:10, color:"rgba(255,255,255,0.45)", marginTop:6, fontFamily:"'JetBrains Mono',monospace" }}>
-                    ≈ {(data.dose.tq20 / 252000 * 1_000_000).toFixed(1)} ppm · ${(data.dose.tq20 * 8.95).toFixed(2)}/hr
+                    {ppmOf(data.dose.tq20) != null ? `≈ ${ppmOf(data.dose.tq20).toFixed(1)} ppm · ` : ""}${(data.dose.tq20 * 8.95).toFixed(2)}/hr
                   </div>
-                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>LIVE · GK 'Corrosion' field @ Inlet</div>
+                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr avg · GK pumps 3+4" : "Simulated"}</div>
                 </div>
                 {/* SI-211 — metered via 'H2S' raw field @ Inlet (multiplexed) */}
                 <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(34,197,94,0.15)" }}>
@@ -994,9 +1067,9 @@ function Dashboard({ userEmail, onLogout }) {
                     {data.dose.si211.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>GPH</span>
                   </div>
                   <div style={{ fontSize:10, color:"rgba(255,255,255,0.45)", marginTop:6, fontFamily:"'JetBrains Mono',monospace" }}>
-                    ≈ {(data.dose.si211 / 252000 * 1_000_000).toFixed(1)} ppm · ${(data.dose.si211 * 2.10).toFixed(2)}/hr
+                    {ppmOf(data.dose.si211) != null ? `≈ ${ppmOf(data.dose.si211).toFixed(1)} ppm · ` : ""}${(data.dose.si211 * 2.10).toFixed(2)}/hr
                   </div>
-                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>LIVE · GK 'H2S' field @ Inlet</div>
+                  <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr avg · GK pumps 1+2" : "Simulated"}</div>
                 </div>
                 {/* H2O2 — standby on Job 1 fresh water; field-collision flagged */}
                 <div style={{ padding:"14px 16px", borderRadius:8, background:"rgba(255,255,255,0.02)", border:"1px dashed rgba(255,255,255,0.1)", opacity:0.85 }}>
@@ -1007,11 +1080,11 @@ function Dashboard({ userEmail, onLogout }) {
                     </div>
                     {overrideBtn("Override")}
                   </div>
-                  <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:24, fontWeight:600, color:"rgba(255,255,255,0.4)" }}>
-                    STANDBY
+                  <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:24, fontWeight:600, color: data.h2o2Active ? "#e2e8f0" : "rgba(255,255,255,0.4)" }}>
+                    {data.h2o2Active ? <>{data.dose.h2o2.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>GPH</span></> : "STANDBY"}
                   </div>
-                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>Not in use — Job 1 fresh water</div>
-                  <div style={{ fontSize:9, color:"rgba(251,191,36,0.55)", marginTop:4, letterSpacing:0.3 }}>Production tag mapping pending telemetry provider</div>
+                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:6, fontStyle:"italic" }}>{data.h2o2Active ? "Demand injection in progress" : "Not in use — fresh water job (no recycled produced water)"}</div>
+                  <div style={{ fontSize:9, color:"rgba(251,191,36,0.55)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr avg · GK pumps 5+6" : "Simulated"}</div>
                 </div>
               </div>
             </div>
@@ -1035,10 +1108,14 @@ function Dashboard({ userEmail, onLogout }) {
           <div className="fade-in">
             {/* Tanks */}
             <div style={{ fontSize:12, color:"rgba(255,255,255,0.35)", marginBottom:16, letterSpacing:0.5 }}>
-              Tank levels updated live via GK telemetry. Cost calculated from actual metered usage.
+              {useSnap ? `Tank levels — last reading as of ${fmtSnapTime}. Cost calculated from actual tank drawdown.` : "Tank levels shown from last known values. Cost calculated from actual tank drawdown."}
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(280px, 1fr))", gap:16, marginBottom:24 }}>
-              {tanks.map(t => <TankLevel key={t.id} {...t}/>)}
+              {tanks.map(t => {
+                const volKey = t.id === 1 ? "fluid_volume_tq_20" : t.id === 2 ? "fluid_volume_si_211" : null;
+                const v = useSnap && volKey ? svLatest(volKey) : null;
+                return <TankLevel key={t.id} {...t} current={v != null ? Math.round(v) : t.current}/>;
+              })}
             </div>
 
             {/* Cost — Two columns */}
@@ -1076,7 +1153,7 @@ function Dashboard({ userEmail, onLogout }) {
                 <div style={{ borderTop:"2px solid rgba(34,211,238,0.15)", marginTop:4, paddingTop:12, display:"flex", justifyContent:"space-between", alignItems:"flex-end" }}>
                   <div>
                     <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>{today.bbl.toLocaleString()} bbl treated</div>
-                    <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)", marginTop:2 }}>${costPerBbl.toFixed(4)} /bbl</div>
+                    <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)", marginTop:2 }}>{costPerBbl != null ? `$${costPerBbl.toFixed(4)} /bbl` : "$/bbl — pending treated volume"}</div>
                   </div>
                   <div style={{ fontSize:28, fontWeight:700, color:"#22d3ee", fontFamily:"'JetBrains Mono',monospace" }}>${totalCost.toFixed(2)}</div>
                 </div>
@@ -1088,10 +1165,10 @@ function Dashboard({ userEmail, onLogout }) {
                   <span style={{color:"#a78bfa"}}><Icon type="chart" size={16}/></span>
                   <span style={{ fontSize:12, fontWeight:600, color:"rgba(255,255,255,0.5)", letterSpacing:1.5, textTransform:"uppercase" }}>7-Day Cost Trend</span>
                 </div>
-                <CostChart data={DAILY_USAGE}/>
+                <CostChart data={usage}/>
                 <div style={{ borderTop:"1px solid rgba(255,255,255,0.06)", marginTop:16, paddingTop:12, display:"flex", justifyContent:"space-between" }}>
                   <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)" }}>
-                    {weekTotals.bbl.toLocaleString()} bbl total · ${(weekCost/weekTotals.bbl).toFixed(4)}/bbl avg
+                    {weekTotals.bbl.toLocaleString()} bbl total{weekTotals.bbl > 0 ? ` · $${(weekCost/weekTotals.bbl).toFixed(4)}/bbl avg` : ""}{usageReal ? "" : " · placeholder until history accrues"}
                   </div>
                   <div style={{ fontSize:14, fontWeight:600, color:"#a78bfa", fontFamily:"'JetBrains Mono',monospace" }}>
                     ${weekCost.toFixed(2)} <span style={{ fontSize:11, color:"rgba(255,255,255,0.3)", fontWeight:400 }}>7-day total</span>

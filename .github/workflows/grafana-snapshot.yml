@@ -35,9 +35,25 @@ jobs:
           GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
           GRAFANA_PASS: ${{ secrets.GRAFANA_PASS }}
           GRAFANA_BASE: https://gkoilfield.grafana.net
-          DASH_PATH: /d/tasp46j/supreme-on-the-fly-water-treatment
-          PAD: 'DAUNTLESS EAST'
+          SNAPSHOT_MODE: targeted
+          DASH_PATHS: /d/tasp46j/supreme-on-the-fly-water-treatment,/d/tan2hlz/supreme-on-the-fly-tank-levels
         run: node scripts/grafana-snapshot.mjs
+
+      - name: Publish snapshot to Supabase (gated write)
+        env:
+          SNAPSHOT_WRITE_KEY: ${{ secrets.SNAPSHOT_WRITE_KEY }}
+        run: |
+          test -f data/live_snapshot.json
+          node -e '
+            const s = require("./data/live_snapshot.json");
+            const body = { customer_code: "DOUBLE_EAGLE", pad: s.pad || null, updated_at: s.updatedAt,
+              payload: { source: s.source, window: s.window, interval: s.interval, seriesCount: s.seriesCount, series: s.series } };
+            require("fs").writeFileSync("data/put-body.json", JSON.stringify(body));
+          '
+          curl -sf -X POST "https://bfpsvvojskrbzrhcuuwe.supabase.co/functions/v1/snapshot-put" \
+            -H "Content-Type: application/json" \
+            -H "x-snapshot-key: ${SNAPSHOT_WRITE_KEY}" \
+            --data @data/put-body.json | grep -q '"ok":true' && echo "snapshot published"
 
       - name: Upload snapshot (private artifact, not public)
         if: always()
