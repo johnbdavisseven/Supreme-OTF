@@ -1067,7 +1067,7 @@ function Dashboard({ userEmail, onLogout }) {
                     {data.dose.si211.toFixed(2)}<span style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginLeft:6, fontWeight:400 }}>GPH</span>
                   </div>
                   <div style={{ fontSize:10, color:"rgba(255,255,255,0.45)", marginTop:6, fontFamily:"'JetBrains Mono',monospace" }}>
-                    {ppmOf(data.dose.si211) != null ? `≈ ${ppmOf(data.dose.si211).toFixed(1)} ppm · ` : ""}${(data.dose.si211 * 2.10).toFixed(2)}/hr
+                    {ppmOf(data.dose.si211) != null ? `≈ ${ppmOf(data.dose.si211).toFixed(1)} ppm · ` : ""}${(data.dose.si211 * 3.00).toFixed(2)}/hr
                   </div>
                   <div style={{ fontSize:9, color:"rgba(34,197,94,0.5)", marginTop:4, letterSpacing:0.3 }}>{useSnap ? "24-hr avg · GK pumps 1+2" : "Simulated"}</div>
                 </div>
